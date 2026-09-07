@@ -15,8 +15,11 @@ COPY . .
 # Build the application
 RUN npm run build
 
-# Expose the port (Northflank will use this or you can configure it in the dashboard)
+# Expose the port
 EXPOSE 3000
 
+# Set environment to production
+ENV NODE_ENV=production
+
 # Start the server
-CMD ["npm", "start"]
+CMD ["node", "dist/server.cjs"]
