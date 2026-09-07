@@ -1,0 +1,99 @@
+[
+  {
+    "id": 15,
+    "manga_id": 24,
+    "chapter_number": 4,
+    "title": "",
+    "release_date": "2026-09-07T16:11:10.295Z",
+    "pages": [
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3559/20260110102223_1a04421b.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3559/20260110102229_902ba1af.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3559/20260110102235_1b5b294f.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3559/20260110102241_2ebfaef8.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3559/20260110102247_eadcc547.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3559/20260110102256_84663004.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3559/20260110102302_b1f3adf6.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3559/20260110102308_9e1115f0.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3559/20260110102309_82002be5.webp"
+    ],
+    "views": 0,
+    "created_at": "2026-09-07T16:11:10.295Z",
+    "price_coins": 10
+  },
+  {
+    "id": 14,
+    "manga_id": 24,
+    "chapter_number": 3,
+    "title": "",
+    "release_date": "2026-09-07T16:10:38.362Z",
+    "pages": [
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3558/20260110102155_79cf217e.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3558/20260110102202_1852f87e.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3558/20260110102209_1bda2e22.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3558/20260110102216_54e9bc17.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3558/20260110102222_59fc48db.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3558/20260110102229_dcd6ab43.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3558/20260110102236_5e3abe4a.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3558/20260110102238_7b48a09e.webp"
+    ],
+    "views": 0,
+    "created_at": "2026-09-07T16:10:38.362Z",
+    "price_coins": 0
+  },
+  {
+    "id": 13,
+    "manga_id": 24,
+    "chapter_number": 2,
+    "title": "",
+    "release_date": "2026-09-07T16:09:59.370Z",
+    "pages": [
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3557/20260110102103_c3bec6a2.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3557/20260110102113_a2eb6a0c.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3557/20260110102122_227b4d5f.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3557/20260110102131_a4555621.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3557/20260110102140_117e1827.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3557/20260110102148_fe9313b9.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3557/20260110102157_6e073c4e.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3557/20260110102200_cad60fab.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3557/20260110102202_7b70cc9d.webp"
+    ],
+    "views": 0,
+    "created_at": "2026-09-07T16:09:59.370Z",
+    "price_coins": 0
+  },
+  {
+    "id": 12,
+    "manga_id": 24,
+    "chapter_number": 1,
+    "title": "",
+    "release_date": "2026-09-07T16:06:04.500Z",
+    "pages": [
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101745_8f3bf8e4.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101752_6a7d9506.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101759_c671e2df.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101805_0947eca5.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101813_8010b377.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101820_0977ddd6.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101828_d53b3dbc.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101837_fe22ab4e.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101844_0107f9d8.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101850_54ec918b.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101858_0e84b8fd.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101906_f55766dc.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101911_b1a5dcbf.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101920_95341e8f.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101928_abb23e09.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101933_dd5dc995.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101941_6668a251.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101948_4d5c3bd9.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110101954_00244b6f.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110102002_391ff13d.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110102008_ffab5cd7.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110102015_2d7f564c.webp",
+      "https://topmangauz.lon1.cdn.digitaloceanspaces.com/topmangauz/chapter_images/3556/20260110102016_f67134fd.webp"
+    ],
+    "views": 0,
+    "created_at": "2026-09-07T16:06:04.500Z",
+    "price_coins": 0
+  }
+]

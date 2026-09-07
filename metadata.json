@@ -1,0 +1,6 @@
+{
+  "name": "AniManga Uz",
+  "description": "wiwi.uz kloni: Manga, manhwa va manhua mutolaa platformasi hamda PostgreSQL bilan integratsiyalashgan admin paneli.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

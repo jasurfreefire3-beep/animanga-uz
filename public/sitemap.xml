@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+  <url>
+    <loc>https://animanga.uz/</loc>
+    <lastmod>2026-09-07</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://animanga.uz/manga</loc>
+    <lastmod>2026-09-07</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://animanga.uz/genres</loc>
+    <lastmod>2026-09-07</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://animanga.uz/manga/24</loc>
+    <lastmod>2026-09-07</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://litter.catbox.moe/g53enk.webp</image:loc>
+      <image:title>Mening xotinim iblis qirolichasi - O&apos;zbek tilida o&apos;qish (Reyting: 8.5★)</image:title>
+      <image:caption>Syan Ye juda oddiy yigit edi, lekin uzukni sotib olganidan so‘ng, u Iblis qabilasining a’zolari, shu jumladan ularning qirolichasi Izabella Os tomonidan boshqa dunyoga chaqirilgan bo‘ladi. Ularning hayotini odamlar armiyasidan qutqarishga urinib, Syan Ye hozir juda zaiflashgan Izabella uning rafiqas</image:caption>
+    </image:image>
+  </url>
+</urlset>

@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile data stored in Firestore",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Unique Firebase User ID or Telegram User ID"
+        },
+        "username": {
+          "type": "string",
+          "description": "User display handle or username"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full display name"
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address if available"
+        },
+        "avatar_url": {
+          "type": "string",
+          "description": "Catbox or profile avatar URL"
+        },
+        "bio": {
+          "type": "string",
+          "description": "User biography"
+        },
+        "auth_provider": {
+          "type": "string",
+          "description": "Authentication provider: google or telegram"
+        },
+        "isAdmin": {
+          "type": "boolean",
+          "description": "Admin status flag"
+        },
+        "coins": {
+          "type": "number",
+          "description": "User balance coins"
+        },
+        "created_at": {
+          "type": "string",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["username", "name"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Stores registered user profiles and preferences"
+    }
+  }
+}

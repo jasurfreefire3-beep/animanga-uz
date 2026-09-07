@@ -1,0 +1,22 @@
+{
+  "name": "AniManga Uz - Manga & Manhwa",
+  "short_name": "AniManga Uz",
+  "description": "Manga, manhwa va manhua mutolaa platformasi",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020d07",
+  "theme_color": "#00DC82",
+  "icons": [
+    {
+      "src": "https://files.catbox.moe/adt7bt.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

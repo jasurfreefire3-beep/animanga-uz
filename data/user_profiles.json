@@ -1,0 +1,16 @@
+{
+  "admin": {
+    "username": "admin",
+    "name": "Bosh Administrator",
+    "avatar_url": "https://files.catbox.moe/g244x0.jpg",
+    "bio": "AniManga Uz platformasi asoschisi va bosh muharriri.",
+    "isAdmin": true,
+    "coins": 500,
+    "unlocked_chapters": [],
+    "created_at": "2026-09-07",
+    "comments": [],
+    "liked_mangas": [],
+    "views_history": [],
+    "bookmarks": []
+  }
+}
