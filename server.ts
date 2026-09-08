@@ -285,9 +285,10 @@ async function startServer() {
   });
 
   // Chapters routes
-  app.get('/api/chapters', async (_req, res) => {
+  app.get('/api/chapters', async (req, res) => {
     try {
-      const chapters = await getAllChapters();
+      const mangaId = req.query.manga_id ? parseInt(req.query.manga_id as string, 10) : undefined;
+      const chapters = await getAllChapters(mangaId);
       res.json(chapters);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -667,7 +668,20 @@ async function startServer() {
   });
 
   // 5. Update Chapter Price (Admin)
-  app.patch('/api/chapters/:id/price', async (req, res) => {
+  
+  app.put('/api/chapters/:id', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { updateChapter } = await import('./src/server/db.ts');
+      const updated = await updateChapter(id, req.body);
+      if (!updated) return res.status(404).json({ error: "Chapter not found" });
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+app.patch('/api/chapters/:id/price', async (req, res) => {
     try {
       const chapterId = parseInt(req.params.id, 10);
       const { price_coins } = req.body;

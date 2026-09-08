@@ -79,7 +79,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [pagesUploadError, setPagesUploadError] = useState<string | null>(null);
   const chapterPagesInputRef = useRef<HTMLInputElement>(null);
 
-  const [chapterForm, setChapterForm] = useState({
+  const [chapterForm, setChapterForm] = useState<{
+    id: number | null;
+    manga_id: number;
+    chapter_number: number;
+    title: string;
+    pagesText: string;
+    price_coins: number;
+  }>({
+    id: null,
     manga_id: mangas[0]?.id || 16,
     chapter_number: 1,
     title: '',
@@ -104,6 +112,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   } | null>(null);
   const [newPriceValue, setNewPriceValue] = useState<number>(0);
 
+  // All Chapters state (for real-time editing & management)
+  const [chaptersList, setChaptersList] = useState<Chapter[]>([]);
+  const [isLoadingChapters, setIsLoadingChapters] = useState(false);
+  const [selectedMangaFilter, setSelectedMangaFilter] = useState<number | 'all'>('all');
+  const [chapterSearchQuery, setChapterSearchQuery] = useState('');
+
+  const fetchChapters = async () => {
+    setIsLoadingChapters(true);
+    try {
+      const res = await fetch('/api/chapters');
+      if (res.ok) {
+        const data = await res.json();
+        setChaptersList(Array.isArray(data) ? data : []);
+      }
+    } catch (err: any) {
+      console.error('fetchChapters error:', err);
+    } finally {
+      setIsLoadingChapters(false);
+    }
+  };
+
   // SQL Query console state
   const [sqlQuery, setSqlQuery] = useState('SELECT * FROM mangas LIMIT 5;');
   const [sqlResult, setSqlResult] = useState<any>(null);
@@ -122,7 +151,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   useEffect(() => {
     fetchDbStatus();
+    fetchChapters();
   }, []);
+
+  // Filtered chapters for the Chapters tab
+  const filteredChapters = chaptersList.filter((ch) => {
+    if (selectedMangaFilter !== 'all' && ch.manga_id !== selectedMangaFilter) return false;
+    if (chapterSearchQuery.trim()) {
+      const q = chapterSearchQuery.toLowerCase();
+      const m = mangas.find((item) => item.id === ch.manga_id);
+      const titleMatch = (ch.title || '').toLowerCase().includes(q);
+      const numMatch = String(ch.chapter_number).includes(q);
+      const mangaMatch = (m?.title || ch.manga_title || '').toLowerCase().includes(q);
+      if (!titleMatch && !numMatch && !mangaMatch) return false;
+    }
+    return true;
+  });
 
   // Helper to toggle a genre pill in Manga Form
   const handleToggleGenre = (gName: string) => {
@@ -281,14 +325,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Open Chapter Modal with auto-calculated next chapter number
   const handleOpenCreateChapter = (mangaId?: number) => {
     const targetId = mangaId || (mangas[0] ? mangas[0].id : 1);
-    const targetManga = mangas.find((m) => m.id === targetId);
+    const mChapters = chaptersList.filter((c) => c.manga_id === targetId);
     let nextNum = 1;
-    if (targetManga && targetManga.chapters && targetManga.chapters.length > 0) {
-      const maxNum = Math.max(...targetManga.chapters.map((c) => Number(c.chapter_number) || 0));
+    if (mChapters.length > 0) {
+      const maxNum = Math.max(...mChapters.map((c) => Number(c.chapter_number) || 0));
       nextNum = Math.floor(maxNum) + 1;
     }
 
     setChapterForm({
+      id: null,
       manga_id: targetId,
       chapter_number: nextNum,
       title: '',
@@ -300,11 +345,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setShowChapterModal(true);
   };
 
+  const handleOpenEditChapter = (ch: Chapter) => {
+    setChapterForm({
+      id: ch.id,
+      manga_id: ch.manga_id,
+      chapter_number: Number(ch.chapter_number),
+      title: ch.title || '',
+      pagesText: ch.pages ? (Array.isArray(ch.pages) ? ch.pages.join('\n') : String(ch.pages)) : '',
+      price_coins: Number(ch.price_coins || 0),
+    });
+    setPagesUploadError(null);
+    setPagesUploadProgress(null);
+    setShowChapterModal(true);
+  };
+
   const handleMangaChangeInChapter = (mId: number) => {
-    const targetManga = mangas.find((m) => m.id === mId);
+    const mChapters = chaptersList.filter((c) => c.manga_id === mId);
     let nextNum = 1;
-    if (targetManga && targetManga.chapters && targetManga.chapters.length > 0) {
-      const maxNum = Math.max(...targetManga.chapters.map((c) => Number(c.chapter_number) || 0));
+    if (mChapters.length > 0) {
+      const maxNum = Math.max(...mChapters.map((c) => Number(c.chapter_number) || 0));
       nextNum = Math.floor(maxNum) + 1;
     }
     setChapterForm((prev) => ({
@@ -379,20 +438,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         .map((s) => s.trim())
         .filter(Boolean);
 
-      await fetch('/api/chapters', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          manga_id: Number(chapterForm.manga_id),
-          chapter_number: Number(chapterForm.chapter_number),
-          title: chapterForm.title,
-          pages: pages.length > 0 ? pages : undefined,
-          price_coins: Number(chapterForm.price_coins || 0),
-        }),
-      });
-      setShowChapterModal(false);
-      setActionMessage('Yangi bob PostgreSQL bazasiga muvaffaqiyatli qo\'shildi');
+      const payload = {
+        manga_id: Number(chapterForm.manga_id),
+        chapter_number: Number(chapterForm.chapter_number),
+        title: chapterForm.title,
+        pages: pages.length > 0 ? pages : undefined,
+        price_coins: Number(chapterForm.price_coins || 0),
+      };
+
+      if (chapterForm.id) {
+        await fetch(`/api/chapters/${chapterForm.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        setShowChapterModal(false);
+        setActionMessage('Bob muvaffaqiyatli tahrirlandi');
+      } else {
+        await fetch('/api/chapters', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        setActionMessage('Yangi bob muvaffaqiyatli qo\'shildi (Keyingisini qo\'shishingiz mumkin)');
+        // Keep modal open and auto-increment for faster subsequent additions
+        setChapterForm((prev) => ({
+          ...prev,
+          chapter_number: Number(prev.chapter_number) + 1,
+          pagesText: '',
+          title: '',
+        }));
+      }
+
       onRefreshData();
+      fetchChapters();
       fetchDbStatus();
     } catch (err: any) {
       setActionMessage('Xatolik: ' + err.message);
@@ -426,6 +505,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setActionMessage(`Bob narxi ${newPriceValue} tanga qilib belgilandi!`);
       setPriceModal(null);
       onRefreshData();
+      fetchChapters();
       fetchDbStatus();
     } catch (err: any) {
       setActionMessage('Xatolik: ' + err.message);
@@ -451,6 +531,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       if (!res.ok) throw new Error('Bobni o\'chirib bo\'lmadi');
       setActionMessage('Bob muvaffaqiyatli o\'chirildi');
       onRefreshData();
+      fetchChapters();
       fetchDbStatus();
     } catch (err: any) {
       setActionMessage('Xatolik: ' + (err.message || 'Bobni o\'chirishda xatolik'));
@@ -788,10 +869,44 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </span>
                       </td>
                       <td className="p-3.5 font-bold text-amber-300">★ {m.rating}</td>
-                      <td className="p-3.5 text-zinc-300">{m.chapter_count || m.chapters?.length || 0} ta</td>
+                      <td className="p-3.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedMangaFilter(m.id);
+                            setActiveTab('chapters');
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-[#00DC82]/10 hover:bg-[#00DC82]/25 text-[#00DC82] border border-[#00DC82]/30 text-xs font-semibold flex items-center gap-1.5 transition-all group"
+                          title="Ushbu manganing barcha boblarini ko'rish va tahrirlash"
+                        >
+                          <Layers className="w-3.5 h-3.5 text-[#00DC82]" />
+                          <span>{chaptersList.filter((c) => c.manga_id === m.id).length || m.chapter_count || 0} ta bob</span>
+                          <span className="text-[10px] opacity-70 group-hover:translate-x-0.5 transition-transform">➔</span>
+                        </button>
+                      </td>
                       <td className="p-3.5 text-zinc-400">{m.views}</td>
                       <td className="p-3.5 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => {
+                              setSelectedMangaFilter(m.id);
+                              setActiveTab('chapters');
+                            }}
+                            className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:text-white hover:bg-blue-500/30"
+                            title="Boblarni ko'rish va tahrirlash"
+                          >
+                            <Layers className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setActiveTab('chapters');
+                              handleOpenCreateChapter(m.id);
+                            }}
+                            className="p-1.5 rounded-lg bg-[#00DC82]/10 text-[#00DC82] hover:text-white hover:bg-[#00DC82]/30"
+                            title="Yangi bob qo'shish"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={() => handleOpenEditManga(m)}
                             className="p-1.5 rounded-lg bg-[#141428] text-zinc-300 hover:text-white hover:bg-[#1e1e3a]"
@@ -819,104 +934,325 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         {/* Tab 2: Chapters Management */}
         {activeTab === 'chapters' && (
           <div className="bg-[#0a0a1a] border border-[#1e1e3a] rounded-2xl p-6 shadow-xl space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* Header */}
+            <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-white/5">
               <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <span>Boblar va Tangalar boshqaruvi</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                    🪙 Tangalar tizimi
+                <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                  <span>Boblar boshqaruvi va Tahrirlash</span>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-[#00DC82] border border-emerald-500/30 font-semibold">
+                    {chaptersList.length} ta bob
                   </span>
                 </h3>
                 <p className="text-xs text-[#a0a0b8] mt-1">
-                  Har bir bob uchun narxni tilla tangalarda belgilashingiz mumkin (0 = Bepul).
+                  Har bir bobning sahifalari, narxi va nomini tahrirlashingiz yoki yangi bob qo'shishingiz mumkin.
                 </p>
               </div>
 
-              <button
-                onClick={() => handleOpenCreateChapter()}
-                className="btn-ios btn-ios-solid text-xs py-2 px-3.5 flex items-center gap-1.5 font-bold"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Yangi Bob qo'shish</span>
-              </button>
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={() => fetchChapters()}
+                  disabled={isLoadingChapters}
+                  className="btn-ios text-xs py-2 px-3 flex items-center gap-1.5 text-zinc-300 hover:text-white"
+                  title="Boblar ro'yxatini yangilash"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingChapters ? 'animate-spin text-[#00DC82]' : ''}`} />
+                  <span>Yangilash</span>
+                </button>
+                <button
+                  onClick={() => handleOpenCreateChapter(selectedMangaFilter !== 'all' ? selectedMangaFilter : undefined)}
+                  className="btn-ios btn-ios-solid text-xs py-2 px-3.5 flex items-center gap-1.5 font-bold"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Yangi Bob qo'shish</span>
+                </button>
+              </div>
             </div>
 
-            <div className="space-y-4">
-              {mangas.map((m) => (
-                <div key={m.id} className="p-4 rounded-xl bg-[#141428]/80 border border-[#1e1e3a] space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <img src={m.cover_image} alt={m.title} className="w-12 h-16 object-cover rounded-lg shadow-sm" />
-                      <div>
-                        <h4 className="font-bold text-sm text-white">{m.title}</h4>
-                        <p className="text-xs text-[#00DC82]">{m.chapters?.length || 0} ta bob mavjud</p>
-                      </div>
-                    </div>
+            {/* Filter & Search Bar */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-xl bg-[#141428]/60 border border-[#1e1e3a]">
+              {/* Manga Selector */}
+              <div>
+                <label className="text-[11px] font-medium text-[#a0a0b8] block mb-1">Manga bo'yicha filter:</label>
+                <select
+                  value={selectedMangaFilter}
+                  onChange={(e) => setSelectedMangaFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                  className="w-full bg-[#020d07] border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#00DC82] font-semibold"
+                >
+                  <option value="all">Barcha mangalar ({chaptersList.length} ta bob)</option>
+                  {mangas.map((m) => {
+                    const count = chaptersList.filter((c) => c.manga_id === m.id).length;
+                    return (
+                      <option key={m.id} value={m.id}>
+                        {m.title} ({count} ta bob)
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
 
+              {/* Search input */}
+              <div className="md:col-span-2">
+                <label className="text-[11px] font-medium text-[#a0a0b8] block mb-1">Qidirish (bob raqami yoki nomi):</label>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={chapterSearchQuery}
+                    onChange={(e) => setChapterSearchQuery(e.target.value)}
+                    placeholder="Masalan: 1-bob, prolog, yoki manga nomi..."
+                    className="w-full bg-[#020d07] border border-white/10 rounded-xl pl-8 pr-3 py-2 text-xs text-white outline-none focus:border-[#00DC82]"
+                  />
+                  {chapterSearchQuery && (
                     <button
-                      onClick={() => handleOpenCreateChapter(m.id)}
-                      className="btn-ios btn-ios-sm py-1.5 px-3 text-xs font-semibold flex items-center gap-1.5"
+                      onClick={() => setChapterSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white"
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Yangi bob qo'shish</span>
+                      <X className="w-3.5 h-3.5" />
                     </button>
-                  </div>
+                  )}
+                </div>
+              </div>
+            </div>
 
-                  {/* Chapters sub-list */}
-                  {m.chapters && m.chapters.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 pt-2 border-t border-white/5">
-                      {m.chapters.map((ch) => (
+            {/* Quick Status Chips */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-zinc-300">
+                Jami: <b className="text-white">{chaptersList.length}</b> ta bob
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-[#00DC82]/10 border border-[#00DC82]/20 text-[#00DC82]">
+                Ko'rsatilmoqda: <b>{filteredChapters.length}</b> ta
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300">
+                🪙 Pullik: <b>{chaptersList.filter((c) => (c.price_coins || 0) > 0).length}</b> ta
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
+                Bepul: <b>{chaptersList.filter((c) => !c.price_coins).length}</b> ta
+              </span>
+              {(selectedMangaFilter !== 'all' || chapterSearchQuery) && (
+                <button
+                  onClick={() => {
+                    setSelectedMangaFilter('all');
+                    setChapterSearchQuery('');
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/15 text-xs text-zinc-300 flex items-center gap-1 transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                  <span>Filterni tozalash</span>
+                </button>
+              )}
+            </div>
+
+            {/* Chapter Items List */}
+            {selectedMangaFilter !== 'all' || chapterSearchQuery.trim() ? (
+              // Filtered direct list view
+              <div className="space-y-3">
+                {filteredChapters.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {filteredChapters.map((ch) => {
+                      const m = mangas.find((item) => item.id === ch.manga_id);
+                      const pageCount = Array.isArray(ch.pages)
+                        ? ch.pages.length
+                        : typeof ch.pages === 'string'
+                        ? JSON.parse(ch.pages || '[]').length
+                        : 0;
+
+                      return (
                         <div
                           key={ch.id}
-                          className="p-2.5 rounded-lg bg-black/40 border border-white/10 flex items-center justify-between text-xs hover:border-white/20 transition-all"
+                          className="p-3.5 rounded-2xl bg-[#141428]/90 border border-[#1e1e3a] hover:border-[#00DC82]/40 transition-all flex flex-col justify-between gap-3 group"
                         >
-                          <div className="min-w-0 pr-2">
-                            <span className="font-bold text-white block truncate">
-                              {ch.chapter_number}-bob {ch.title ? `(${ch.title})` : ''}
-                            </span>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              {(ch.price_coins || 0) > 0 ? (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px] border border-amber-500/30">
-                                  <span>🪙</span> {ch.price_coins} tanga
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-semibold text-[10px]">
-                                  Bepul
-                                </span>
+                          <div>
+                            <div className="flex items-start gap-2.5 mb-2">
+                              {m?.cover_image && (
+                                <img
+                                  src={m.cover_image}
+                                  alt={m.title}
+                                  className="w-10 h-14 object-cover rounded-lg border border-white/10 shrink-0"
+                                />
                               )}
-                              <span className="text-[10px] text-[#a0a0b8]">
-                                {ch.pages?.length || 0} rasm
-                              </span>
+                              <div className="min-w-0 flex-1">
+                                <span className="text-[11px] text-[#00DC82] font-semibold block truncate">
+                                  {m?.title || ch.manga_title || `Manga #${ch.manga_id}`}
+                                </span>
+                                <h4 className="font-bold text-sm text-white truncate mt-0.5">
+                                  {ch.chapter_number}-bob {ch.title ? `(${ch.title})` : ''}
+                                </h4>
+                                <div className="flex items-center gap-2 mt-1">
+                                  {(ch.price_coins || 0) > 0 ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px] border border-amber-500/30">
+                                      <span>🪙</span> {ch.price_coins} tanga
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold text-[10px]">
+                                      Bepul
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-[#a0a0b8]">
+                                    📸 {pageCount} ta rasm
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1 shrink-0">
+                          {/* Action Buttons */}
+                          <div className="flex items-center gap-1.5 pt-2 border-t border-white/5">
                             <button
-                              onClick={() => handleOpenPriceModal(ch)}
-                              className="p-1.5 rounded-md hover:bg-amber-500/20 text-amber-300 transition-colors cursor-pointer"
-                              title="Narxni o'zgartirish"
+                              onClick={() => handleOpenEditChapter(ch)}
+                              className="flex-1 py-1.5 px-2.5 rounded-xl bg-[#00DC82]/15 hover:bg-[#00DC82] text-[#00DC82] hover:text-[#020d07] border border-[#00DC82]/30 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              title="Bobni tahrirlash"
                             >
                               <Edit className="w-3.5 h-3.5" />
+                              <span>Tahrirlash</span>
+                            </button>
+                            <button
+                              onClick={() => handleOpenPriceModal(ch)}
+                              className="py-1.5 px-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                              title="Narxni belgilash"
+                            >
+                              <span>🪙</span>
+                              <span className="hidden sm:inline">Narx</span>
                             </button>
                             <button
                               onClick={() => handleOpenDeleteChapter(ch)}
-                              className="p-1.5 rounded-md hover:bg-red-500/20 text-red-400 transition-colors cursor-pointer"
+                              className="p-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 text-xs transition-all flex items-center justify-center cursor-pointer"
                               title="Bobni o'chirish"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
-                      ))}
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-8 rounded-2xl bg-black/20 border border-white/5 text-center text-[#a0a0b8] space-y-2">
+                    <p className="text-sm">Qidiruv yoki filter bo'yicha hech qanday bob topilmadi.</p>
+                    <button
+                      onClick={() => handleOpenCreateChapter(selectedMangaFilter !== 'all' ? selectedMangaFilter : undefined)}
+                      className="btn-ios btn-ios-solid text-xs py-2 px-4 inline-flex items-center gap-1.5 font-bold mt-2"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Ushbu mangaga bob qo'shish</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              // Manga-grouped view (default)
+              <div className="space-y-4">
+                {mangas.map((m) => {
+                  const mChapters = chaptersList
+                    .filter((c) => c.manga_id === m.id)
+                    .sort((a, b) => Number(a.chapter_number) - Number(b.chapter_number));
+
+                  return (
+                    <div key={m.id} className="p-4 rounded-2xl bg-[#141428]/80 border border-[#1e1e3a] space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={m.cover_image}
+                            alt={m.title}
+                            className="w-12 h-16 object-cover rounded-xl border border-white/10 shadow-sm"
+                          />
+                          <div>
+                            <h4 className="font-bold text-sm sm:text-base text-white">{m.title}</h4>
+                            <p className="text-xs text-[#00DC82] font-semibold mt-0.5">
+                              {mChapters.length} ta bob mavjud
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleOpenCreateChapter(m.id)}
+                          className="btn-ios btn-ios-sm py-1.5 px-3 text-xs font-semibold flex items-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Yangi bob qo'shish</span>
+                        </button>
+                      </div>
+
+                      {/* Chapters sub-list */}
+                      {mChapters.length > 0 ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 pt-2 border-t border-white/5">
+                          {mChapters.map((ch) => {
+                            const pageCount = Array.isArray(ch.pages)
+                              ? ch.pages.length
+                              : typeof ch.pages === 'string'
+                              ? JSON.parse(ch.pages || '[]').length
+                              : 0;
+
+                            return (
+                              <div
+                                key={ch.id}
+                                className="p-3 rounded-xl bg-black/50 border border-white/10 flex flex-col justify-between gap-2 text-xs hover:border-[#00DC82]/40 transition-all"
+                              >
+                                <div>
+                                  <span className="font-bold text-white block truncate">
+                                    {ch.chapter_number}-bob {ch.title ? `(${ch.title})` : ''}
+                                  </span>
+                                  <div className="flex items-center gap-1.5 mt-1">
+                                    {(ch.price_coins || 0) > 0 ? (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px] border border-amber-500/30">
+                                        <span>🪙</span> {ch.price_coins} tanga
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-semibold text-[10px]">
+                                        Bepul
+                                      </span>
+                                    )}
+                                    <span className="text-[10px] text-[#a0a0b8]">
+                                      📸 {pageCount} rasm
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 pt-1.5 border-t border-white/5 shrink-0">
+                                  <button
+                                    onClick={() => handleOpenEditChapter(ch)}
+                                    className="flex-1 py-1 px-2 rounded-lg bg-[#00DC82]/15 hover:bg-[#00DC82] text-[#00DC82] hover:text-[#020d07] border border-[#00DC82]/30 transition-colors cursor-pointer flex items-center justify-center gap-1 font-bold text-[11px]"
+                                    title="Bobni tahrirlash"
+                                  >
+                                    <Edit className="w-3 h-3" />
+                                    <span>Tahrirlash</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleOpenPriceModal(ch)}
+                                    className="py-1 px-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/25 transition-colors cursor-pointer flex items-center gap-1 text-[11px]"
+                                    title="Narxni o'zgartirish"
+                                  >
+                                    <span>🪙</span>
+                                    <span className="hidden sm:inline">Narx</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleOpenDeleteChapter(ch)}
+                                    className="p-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/25 transition-colors cursor-pointer flex items-center justify-center"
+                                    title="Bobni o'chirish"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="p-3 rounded-xl bg-black/20 text-xs text-[#a0a0b8] flex items-center justify-between">
+                          <span className="italic">Ushbu mangada hali boblar kiritilmagan.</span>
+                          <button
+                            onClick={() => handleOpenCreateChapter(m.id)}
+                            className="text-[#00DC82] hover:underline font-semibold flex items-center gap-1"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Birinchi bobni qo'shish</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="text-xs text-[#a0a0b8] italic py-1">
-                      Hozircha boblar kiritilmagan.
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -1437,7 +1773,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base sm:text-lg font-bold text-white">
-                    Yangi Bob qo'shish
+                    {chapterForm.id ? "Bobni Tahrirlash" : "Yangi Bob qo'shish"}
                   </h3>
                   <p className="text-[11px] text-[#a0a0b8]">
                     Qurilmadan barcha sahifalarni tanlang (Catbox.moe ga bir zumda yuklanadi)

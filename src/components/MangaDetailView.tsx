@@ -185,18 +185,6 @@ export const MangaDetailView: React.FC<MangaDetailViewProps> = ({
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => {
         if (isMounted && Array.isArray(data)) {
-          const userMangaComments = (userProfile?.comments || [])
-            .filter((c) => c.manga_id === manga.id)
-            .map((c) => ({
-              id: c.id,
-              username: c.user_name || userProfile?.name || user?.username || 'User',
-              avatarText: (c.user_name || userProfile?.name || 'U')[0]?.toUpperCase() || 'U',
-              avatarUrl: c.avatar_url || userProfile?.avatar_url,
-              text: c.text,
-              date: c.date,
-              likes: c.likes || 0,
-            }));
-
           const dbComments: CommentItem[] = data.map((r: any) => ({
             id: String(r.id),
             username: r.name || r.username || 'Foydalanuvchi',
@@ -207,10 +195,7 @@ export const MangaDetailView: React.FC<MangaDetailViewProps> = ({
             likes: Number(r.likes || 0),
           }));
 
-          // Merge without duplicates
-          const seenIds = new Set(dbComments.map((c) => String(c.id)));
-          const filteredUserComments = userMangaComments.filter((c) => !seenIds.has(String(c.id)));
-          setComments([...dbComments, ...filteredUserComments]);
+          setComments(dbComments);
         }
       })
       .catch((err) => console.warn('Failed to load manga comments:', err));
@@ -218,7 +203,7 @@ export const MangaDetailView: React.FC<MangaDetailViewProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [manga.id, userProfile]);
+  }, [manga.id]);
 
   // Professional Dynamic SEO (Title, Tavsif, URL, Rating Ball & Schema.org)
   useEffect(() => {
