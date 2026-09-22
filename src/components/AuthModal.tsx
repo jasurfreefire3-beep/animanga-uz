@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, AlertCircle, Loader2, ShieldCheck, ArrowLeft, ExternalLink, Send, CheckCircle2 } from 'lucide-react';
+import { X, AlertCircle, Loader2, ShieldCheck, ArrowLeft, ExternalLink, Send, CheckCircle2, MessageSquare } from 'lucide-react';
 import { signInWithGoogle, authenticateWithTelegram, type TelegramAuthData } from '../lib/firebase.js';
 
 interface AuthModalProps {
@@ -23,10 +23,14 @@ const BOT_LINK = `https://t.me/${BOT_USERNAME}?start=auth`;
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }) => {
   const [view, setView] = useState<'choose' | 'telegram_code'>('choose');
   const [loadingGoogle, setLoadingGoogle] = useState(false);
+  const [loadingTelegram, setLoadingTelegram] = useState(false);
   const [loadingVerify, setLoadingVerify] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  // 4-digit verification inputs
+  // Telegram widget container ref
+  const telegramWidgetRef = useRef<HTMLDivElement>(null);
+
+  // 4-digit verification inputs (backup fallback)
   const [digits, setDigits] = useState<string[]>(['', '', '', '']);
   const inputRefs = [
     useRef<HTMLInputElement>(null),
@@ -35,11 +39,84 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }
     useRef<HTMLInputElement>(null),
   ];
 
+  // Listen for popup messages from Telegram OpenID OAuth callback
+  useEffect(() => {
+    const handleAuthMessage = async (event: MessageEvent) => {
+      if (!event.data || typeof event.data !== 'object') return;
+      if (event.data.type === 'TG_LOGIN_SUCCESS' && event.data.user) {
+        const tgUser = event.data.user;
+        try {
+          const authData: TelegramAuthData = {
+            id: tgUser.telegram_id,
+            first_name: tgUser.name || tgUser.username,
+            username: tgUser.username,
+            photo_url: tgUser.avatar_url,
+          };
+          await authenticateWithTelegram(authData);
+        } catch (fsErr) {
+          console.warn('Firestore sync warning:', fsErr);
+        }
+        onLogin(tgUser);
+        onClose();
+      } else if (event.data.type === 'TG_LOGIN_ERROR') {
+        setError(event.data.error || 'Telegram orqali kirishda xatolik yuz berdi');
+        setLoadingTelegram(false);
+      }
+    };
+
+    window.addEventListener('message', handleAuthMessage);
+    return () => window.removeEventListener('message', handleAuthMessage);
+  }, [onLogin, onClose]);
+
+  // Set up global Telegram login callback for the script widget
+  useEffect(() => {
+    (window as any).onTelegramAuth = async (user: any) => {
+      try {
+        setLoadingTelegram(true);
+        setError(null);
+        const res = await fetch('/api/auth/telegram/widget-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(user),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok || !data.user) {
+          throw new Error(data.error || "Telegram ma'lumotlarini tekshirishda xatolik");
+        }
+
+        try {
+          const authData: TelegramAuthData = {
+            id: data.user.telegram_id,
+            first_name: data.user.name || data.user.username,
+            username: data.user.username,
+            photo_url: data.user.avatar_url,
+          };
+          await authenticateWithTelegram(authData);
+        } catch (fsErr) {
+          console.warn('Firestore sync warning:', fsErr);
+        }
+
+        onLogin(data.user);
+        onClose();
+      } catch (err: any) {
+        console.error('Telegram Widget Callback Error:', err);
+        setError(err.message || 'Telegram orqali kirishda xatolik');
+      } finally {
+        setLoadingTelegram(false);
+      }
+    };
+
+    return () => {
+      delete (window as any).onTelegramAuth;
+    };
+  }, [onLogin, onClose]);
+
   useEffect(() => {
     if (!isOpen) {
       setError(null);
       setView('choose');
       setDigits(['', '', '', '']);
+      setLoadingTelegram(false);
     }
   }, [isOpen]);
 
@@ -72,13 +149,58 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }
     }
   };
 
-  // Switch to Telegram Bot flow and open Telegram
+  // Telegram OpenID OAuth Pop-up Login
+  const handleTelegramOpenIdLogin = () => {
+    try {
+      setLoadingTelegram(true);
+      setError(null);
+
+      // Determine callback URL
+      const origin = window.location.origin;
+      const callbackUrl = `${origin}/api/auth/telegram/callback`;
+
+      // Telegram OAuth URL
+      // If client domain is registered with BotFather /setdomain, oauth.telegram.org handles authentication
+      const oauthUrl = `https://oauth.telegram.org/auth?bot_id=8978777660&origin=${encodeURIComponent(origin)}&request_access=write&return_to=${encodeURIComponent(callbackUrl)}`;
+
+      // Calculate center coordinates for popup window
+      const width = 540;
+      const height = 620;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+
+      const popup = window.open(
+        oauthUrl,
+        'telegram_oauth',
+        `width=${width},height=${height},left=${left},top=${top},status=0,toolbar=0,menubar=0,location=1`
+      );
+
+      if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        // Fallback to bot code verification if browser blocked popup
+        setView('telegram_code');
+        setLoadingTelegram(false);
+        return;
+      }
+
+      // Check if popup was closed by user
+      const timer = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(timer);
+          setLoadingTelegram(false);
+        }
+      }, 1000);
+    } catch (err: any) {
+      console.error('Telegram OpenID Login error:', err);
+      setError("Telegram oynasini ochishda xatolik. Iltimos bot orqali urinib ko'ring.");
+      setLoadingTelegram(false);
+    }
+  };
+
+  // Switch to Telegram Bot flow and open Telegram (fallback)
   const handleStartTelegramFlow = () => {
     setError(null);
     setView('telegram_code');
-    // Open Telegram Bot in new window / tab
     window.open(BOT_LINK, '_blank', 'noopener,noreferrer');
-    // Focus first input after animation
     setTimeout(() => {
       inputRefs[0].current?.focus();
     }, 150);
@@ -86,7 +208,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }
 
   // Handle digit change
   const handleDigitChange = (index: number, value: string) => {
-    // Handle pasting 4-digit string
     if (value.length > 1) {
       const pastedDigits = value.replace(/\D/g, '').slice(0, 4).split('');
       if (pastedDigits.length > 0) {
@@ -114,20 +235,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }
       inputRefs[index + 1].current?.focus();
     }
 
-    // Auto submit if all 4 are filled
     if (char && index === 3 && newDigits.every((d) => d !== '')) {
       handleVerifyCode(newDigits.join(''));
     }
   };
 
-  // Handle backspace key
   const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Backspace' && !digits[index] && index > 0) {
       inputRefs[index - 1].current?.focus();
     }
   };
 
-  // Verify 4-digit Code with Server & Bot
   const handleVerifyCode = async (codeToVerify?: string) => {
     const code = codeToVerify || digits.join('');
     if (code.length !== 4) {
@@ -153,7 +271,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }
 
       const telegramUser = data.user;
 
-      // Sync with Firestore
       try {
         const authData: TelegramAuthData = {
           id: telegramUser.telegram_id,
@@ -166,7 +283,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }
         console.warn('Firestore sync warning:', fsErr);
       }
 
-      // Complete Login
       onLogin({
         username: telegramUser.username,
         isAdmin: !!telegramUser.isAdmin,
@@ -255,13 +371,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }
               </div>
             )}
 
-            {/* The 2 Primary iOS Glass Auth Buttons */}
-            <div className="space-y-3.5">
+            {/* The Primary iOS Glass Auth Buttons */}
+            <div className="space-y-3">
               {/* 1. Google Login Button (Apple White Glass) */}
               <button
                 type="button"
                 onClick={handleGoogleLogin}
-                disabled={loadingGoogle}
+                disabled={loadingGoogle || loadingTelegram}
                 className="w-full relative flex items-center justify-center gap-3.5 py-3.5 px-6 rounded-2xl bg-white/95 hover:bg-white text-gray-900 font-bold text-sm shadow-[0_8px_25px_rgba(255,255,255,0.15)] border border-white/40 active:scale-[0.97] transition-all duration-200 disabled:opacity-60 cursor-pointer"
                 id="btn-google-login"
               >
@@ -278,18 +394,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }
                 <span>Google bilan kirish</span>
               </button>
 
-              {/* 2. Telegram Bot Login Button (iOS Telegram Glass Blue) */}
+              {/* 2. Telegram OpenID One-Click Login Button */}
               <button
                 type="button"
-                onClick={handleStartTelegramFlow}
-                className="w-full relative flex items-center justify-center gap-3.5 py-3.5 px-6 rounded-2xl ios-glass-btn-telegram active:scale-[0.97] transition-all duration-200 cursor-pointer"
+                onClick={handleTelegramOpenIdLogin}
+                disabled={loadingTelegram || loadingGoogle}
+                className="w-full relative flex items-center justify-center gap-3.5 py-3.5 px-6 rounded-2xl ios-glass-btn-telegram active:scale-[0.97] transition-all duration-200 cursor-pointer shadow-[0_8px_25px_rgba(34,158,217,0.35)]"
                 id="btn-telegram-login"
               >
-                <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 24 24">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.52 2.77-1.16 3.35-1.37 3.73-1.37.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z" />
-                </svg>
-                <span>Telegram bot orqali kirish</span>
+                {loadingTelegram ? (
+                  <Loader2 className="w-5 h-5 text-white animate-spin" />
+                ) : (
+                  <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 24 24">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.52 2.77-1.16 3.35-1.37 3.73-1.37.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z" />
+                  </svg>
+                )}
+                <span>Telegram bilan kirish (OpenID)</span>
               </button>
+
+              {/* Bot Code Option (Small Alternative Link) */}
+              <div className="pt-2 text-center">
+                <button
+                  type="button"
+                  onClick={handleStartTelegramFlow}
+                  className="text-xs text-white/50 hover:text-white/80 transition underline decoration-white/30 hover:decoration-white cursor-pointer"
+                >
+                  yoki Telegram bot (@{BOT_USERNAME}) orqali kirish
+                </button>
+              </div>
             </div>
           </div>
         )}
