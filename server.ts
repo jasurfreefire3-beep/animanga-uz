@@ -919,33 +919,189 @@ app.patch('/api/chapters/:id/price', async (req, res) => {
     }
   });
 
-  // 2. Telegram OAuth / OpenID Redirect Callback (GET - /api/auth/telegram/callback)
+  // State store for PKCE OpenID Connect session
+  interface OidcSession {
+    codeVerifier: string;
+    origin: string;
+    timestamp: number;
+  }
+  const oidcStateStore = new Map<string, OidcSession>();
+
+  // Periodically clean up sessions older than 15 minutes
+  setInterval(() => {
+    const now = Date.now();
+    for (const [state, data] of oidcStateStore.entries()) {
+      if (now - data.timestamp > 15 * 60 * 1000) {
+        oidcStateStore.delete(state);
+      }
+    }
+  }, 60 * 1000);
+
+  // 2. Telegram OpenID Connect Login Init (GET - /api/auth/telegram/login)
+  app.get('/api/auth/telegram/login', (req, res) => {
+    try {
+      const rawOrigin = req.query.origin as string;
+      const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+      const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || 'localhost:3000';
+      const effectiveOrigin = rawOrigin || `${proto}://${host}`;
+      const callbackUrl = `${effectiveOrigin}/api/auth/telegram/callback`;
+
+      // Generate PKCE code_verifier and code_challenge
+      const codeVerifier = crypto.randomBytes(32).toString('base64url');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+      const state = crypto.randomBytes(16).toString('hex');
+
+      oidcStateStore.set(state, {
+        codeVerifier,
+        origin: effectiveOrigin,
+        timestamp: Date.now(),
+      });
+
+      // Telegram OpenID Connect Auth URL
+      const telegramAuthUrl = new URL('https://oauth.telegram.org/auth');
+      telegramAuthUrl.searchParams.set('client_id', TELEGRAM_CLIENT_ID);
+      telegramAuthUrl.searchParams.set('redirect_uri', callbackUrl);
+      telegramAuthUrl.searchParams.set('response_type', 'code');
+      telegramAuthUrl.searchParams.set('scope', 'openid profile');
+      telegramAuthUrl.searchParams.set('state', state);
+      telegramAuthUrl.searchParams.set('code_challenge', codeChallenge);
+      telegramAuthUrl.searchParams.set('code_challenge_method', 'S256');
+
+      return res.redirect(telegramAuthUrl.toString());
+    } catch (err: any) {
+      console.error('[Telegram Login Init Error]', err);
+      return res.status(500).send(`Telegram avtorizatsiyani boshlashda xatolik: ${err.message}`);
+    }
+  });
+
+  // 3. Telegram OAuth / OpenID Redirect Callback (GET - /api/auth/telegram/callback)
   app.get('/api/auth/telegram/callback', async (req, res) => {
     try {
-      const queryData = req.query as Record<string, any>;
-      if (!queryData || !queryData.id) {
+      const { code, state, error, error_description } = req.query as Record<string, string>;
+
+      if (error) {
         return res.send(`
-          <!DOCTYPE html>
-          <html><body>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'TG_LOGIN_ERROR', error: "Avtorizatsiya ma'lumotlari topilmadi" }, '*');
-              window.close();
-            } else {
-              window.location.href = '/';
-            }
-          </script>
+          <!DOCTYPE html><html><body style="background:#0b0f19;color:white;font-family:sans-serif;padding:30px;text-align:center;">
+            <h3 style="color:#ef4444;">Telegram xatoligi: ${error}</h3>
+            <p style="color:#9ca3af;font-size:14px;">${error_description || ''}</p>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'TG_LOGIN_ERROR', error: ${JSON.stringify(error_description || error)} }, '*');
+                setTimeout(() => window.close(), 2500);
+              } else {
+                setTimeout(() => { window.location.href = '/'; }, 2500);
+              }
+            </script>
           </body></html>
         `);
       }
 
-      verifyTelegramAuthData(queryData);
+      let telegramId: string | number = '';
+      let rawUsername = '';
+      let fullName = '';
+      let avatarUrl = '';
 
-      const telegramId = queryData.id;
-      const rawUsername = queryData.username ? String(queryData.username).replace(/^@/, '') : '';
+      // CASE A: Standard OpenID Connect (authorization code)
+      if (code) {
+        const session = state ? oidcStateStore.get(state) : null;
+        if (state && session) {
+          oidcStateStore.delete(state);
+        }
+
+        const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+        const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || 'localhost:3000';
+        const origin = session?.origin || `${proto}://${host}`;
+        const callbackUrl = `${origin}/api/auth/telegram/callback`;
+
+        const codeVerifier = session?.codeVerifier || '';
+
+        // Exchange code at https://oauth.telegram.org/token
+        const tokenBody = new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: code,
+          redirect_uri: callbackUrl,
+          client_id: TELEGRAM_CLIENT_ID,
+          client_secret: TELEGRAM_CLIENT_SECRET,
+        });
+        if (codeVerifier) {
+          tokenBody.set('code_verifier', codeVerifier);
+        }
+
+        const basicAuth = Buffer.from(`${TELEGRAM_CLIENT_ID}:${TELEGRAM_CLIENT_SECRET}`).toString('base64');
+
+        const tokenRes = await fetch('https://oauth.telegram.org/token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': `Basic ${basicAuth}`,
+          },
+          body: tokenBody.toString(),
+        });
+
+        if (!tokenRes.ok) {
+          const errorText = await tokenRes.text();
+          console.error('[Telegram Token Exchange Error]', tokenRes.status, errorText);
+          return res.send(`
+            <!DOCTYPE html><html><body style="background:#0b0f19;color:white;font-family:sans-serif;padding:30px;text-align:center;">
+              <h3 style="color:#ef4444;">Telegram token olishda xatolik (${tokenRes.status})</h3>
+              <p style="color:#9ca3af;font-size:13px;max-width:500px;margin:15px auto;">${errorText}</p>
+              <script>
+                if (window.opener) {
+                  window.opener.postMessage({ type: 'TG_LOGIN_ERROR', error: "Telegram token olishda xatolik yuz berdi" }, '*');
+                  setTimeout(() => window.close(), 3000);
+                } else {
+                  setTimeout(() => { window.location.href = '/'; }, 3000);
+                }
+              </script>
+            </body></html>
+          `);
+        }
+
+        const tokenData = (await tokenRes.json()) as any;
+        const idToken = tokenData.id_token;
+
+        if (!idToken) {
+          throw new Error("Telegram'dan id_token olinmadi");
+        }
+
+        // Parse JWT payload (sub, name, preferred_username, picture)
+        const parts = idToken.split('.');
+        if (parts.length < 2) {
+          throw new Error("Noto'g'ri id_token formati");
+        }
+
+        const payloadJson = Buffer.from(parts[1], 'base64url').toString('utf8');
+        const payload = JSON.parse(payloadJson);
+
+        telegramId = payload.sub;
+        rawUsername = payload.preferred_username ? String(payload.preferred_username).replace(/^@/, '') : '';
+        fullName = payload.name || rawUsername || `User ${telegramId}`;
+        avatarUrl = payload.picture || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(rawUsername || String(telegramId))}`;
+      }
+      // CASE B: Legacy widget redirect query (if id passed directly)
+      else if (req.query.id) {
+        verifyTelegramAuthData(req.query as Record<string, any>);
+        telegramId = req.query.id as string;
+        rawUsername = req.query.username ? String(req.query.username).replace(/^@/, '') : '';
+        fullName = [req.query.first_name, req.query.last_name].filter(Boolean).join(' ') || rawUsername;
+        avatarUrl = (req.query.photo_url as string) || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(rawUsername || String(telegramId))}`;
+      } else {
+        return res.send(`
+          <!DOCTYPE html><html><body style="background:#0b0f19;color:white;font-family:sans-serif;padding:30px;text-align:center;">
+            <h3>Avtorizatsiya ma'lumotlari topilmadi</h3>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'TG_LOGIN_ERROR', error: "Ma'lumot topilmadi" }, '*');
+                setTimeout(() => window.close(), 1500);
+              } else {
+                window.location.href = '/';
+              }
+            </script>
+          </body></html>
+        `);
+      }
+
       const username = rawUsername || `tg_${telegramId}`;
-      const fullName = [queryData.first_name, queryData.last_name].filter(Boolean).join(' ') || username;
-      const avatarUrl = queryData.photo_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(username)}`;
       const isAdmin = (username.toLowerCase() === 'admin' || String(telegramId) === '8978777660' || username.toLowerCase() === 'user321admin');
 
       let existingProfile = await getUserProfile(username);
@@ -960,7 +1116,7 @@ app.patch('/api/chapters/:id/price', async (req, res) => {
       } else {
         existingProfile = await saveUserProfile({
           ...existingProfile,
-          name: fullName,
+          name: fullName || existingProfile.name,
           avatar_url: avatarUrl || existingProfile.avatar_url,
           telegram_id: telegramId,
           isAdmin: existingProfile.isAdmin || isAdmin,
@@ -983,9 +1139,10 @@ app.patch('/api/chapters/:id/price', async (req, res) => {
         <html>
         <head><title>Telegram Kirish - AniManga Uz</title></head>
         <body style="background:#0b0f19;color:white;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
-          <div style="text-align:center;">
-            <h2>Muvaffaqiyatli tasdiqlandi!</h2>
-            <p>Oyna yopilmoqda...</p>
+          <div style="text-align:center;padding:24px;background:rgba(255,255,255,0.05);border-radius:24px;border:1px solid rgba(255,255,255,0.1);max-width:320px;">
+            <div style="font-size:36px;margin-bottom:12px;">✅</div>
+            <h2 style="margin:0 0 8px;font-size:18px;">Muvaffaqiyatli kirdingiz!</h2>
+            <p style="color:#9ca3af;font-size:13px;margin:0;">AniManga Uz tizimiga ulanmoqda...</p>
           </div>
           <script>
             const user = ${JSON.stringify(userPayload)};
@@ -994,7 +1151,7 @@ app.patch('/api/chapters/:id/price', async (req, res) => {
             } catch(e){}
             if (window.opener) {
               window.opener.postMessage({ type: 'TG_LOGIN_SUCCESS', user: user }, '*');
-              setTimeout(() => window.close(), 300);
+              setTimeout(() => window.close(), 350);
             } else {
               window.location.href = '/';
             }
