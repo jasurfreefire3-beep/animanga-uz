@@ -1,0 +1,67 @@
+[
+  {
+    "id": 1,
+    "username": "admin",
+    "name": "Bosh Administrator",
+    "avatar_url": "https://files.catbox.moe/g244x0.jpg",
+    "text": "Assalomu alaykum! AniManga Uz umumiy chatiga xush kelibsiz! 🎉 Bu yerda barcha manga va manhwa ixlosmandlari bilan erkin suhbatlashishingiz mumkin.",
+    "reply_to_id": null,
+    "reply_to_name": null,
+    "reply_to_text": null,
+    "is_admin": true,
+    "likes": 5,
+    "created_at": "2026-09-09T08:04:24.459Z"
+  },
+  {
+    "id": 2,
+    "username": "animanga_bot",
+    "name": "AniManga Bot",
+    "avatar_url": "https://files.catbox.moe/8odaud.png",
+    "text": "Chatda bir-biringizni hurmat qiling. Istalgan xabarga javob (reply) berish uchun xabar ustiga bosing yoki reply belgisini tanlang! ⚡",
+    "reply_to_id": null,
+    "reply_to_name": null,
+    "reply_to_text": null,
+    "is_admin": true,
+    "likes": 5,
+    "created_at": "2026-09-09T08:34:24.459Z"
+  },
+  {
+    "id": 3,
+    "username": "test_user",
+    "name": "Test User",
+    "avatar_url": "",
+    "text": "Salom hammaga!",
+    "reply_to_id": null,
+    "reply_to_name": null,
+    "reply_to_text": null,
+    "is_admin": false,
+    "likes": 1,
+    "created_at": "2026-09-09T09:07:30.508Z"
+  },
+  {
+    "id": 4,
+    "username": "user",
+    "name": "user",
+    "avatar_url": "https://litter.catbox.moe/p4c3hv.png",
+    "text": "Hammaga salom",
+    "reply_to_id": null,
+    "reply_to_name": null,
+    "reply_to_text": null,
+    "is_admin": false,
+    "likes": 0,
+    "created_at": "2026-09-10T08:19:51.862Z"
+  },
+  {
+    "id": 5,
+    "username": "user",
+    "name": "user",
+    "avatar_url": "https://litter.catbox.moe/p4c3hv.png",
+    "text": "Zor",
+    "reply_to_id": 4,
+    "reply_to_name": "user",
+    "reply_to_text": "Hammaga salom",
+    "is_admin": false,
+    "likes": 0,
+    "created_at": "2026-09-10T08:20:19.602Z"
+  }
+]

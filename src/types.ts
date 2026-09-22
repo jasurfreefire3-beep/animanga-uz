@@ -105,3 +105,17 @@ export interface CoinTransaction {
   created_at?: string;
   paid_at?: string;
 }
+
+export interface ChatMessage {
+  id: number;
+  username: string;
+  name: string;
+  avatar_url?: string;
+  text: string;
+  reply_to_id?: number | null;
+  reply_to_name?: string | null;
+  reply_to_text?: string | null;
+  is_admin?: boolean;
+  likes?: number;
+  created_at: string;
+}

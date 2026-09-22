@@ -157,8 +157,8 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  // Fetch initial data
-  const fetchData = useCallback(async () => {
+  // Fetch initial data with automatic retry on initial cold start
+  const fetchData = useCallback(async (retryCount = 0) => {
     try {
       setLoading(true);
       const [mangaRes, genresRes, chaptersRes] = await Promise.all([
@@ -193,15 +193,23 @@ export default function App() {
               setCurrentTab('manga-detail');
             }
           } catch (e) {
-            console.error('Failed to fetch initial manga by URL:', e);
+            console.warn('Initial manga URL fetch warning:', e);
           }
         }
       }
-    } catch (err) {
-      console.error('Failed to fetch data:', err);
-    } finally {
       setLoading(false);
       setIsInitialLoading(false);
+    } catch (err) {
+      if (retryCount < 3) {
+        // Dev server or proxy might be momentarily restarting; retry smoothly
+        setTimeout(() => {
+          fetchData(retryCount + 1);
+        }, 1000 * (retryCount + 1));
+      } else {
+        console.warn('Failed to fetch initial data after retries:', err);
+        setLoading(false);
+        setIsInitialLoading(false);
+      }
     }
   }, []);
 

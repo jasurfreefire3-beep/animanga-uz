@@ -404,6 +404,13 @@ export const MangaDetailView: React.FC<MangaDetailViewProps> = ({
                   alt={`${manga.title} o'zbek tilida manga muqovasi (Reyting: ${manga.rating || 5.0}★) - AniManga Uz`}
                   title={`${manga.title} - Reyting: ${manga.rating || 5.0} / 5 ball. AniManga Uz platformasida o'zbek tilida bepul o'qing.`}
                   loading="eager"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (manga.cover_image && !img.src.includes('/api/image-proxy')) {
+                      img.src = `/api/image-proxy?url=${encodeURIComponent(manga.cover_image)}`;
+                    }
+                  }}
                   itemProp="image"
                   className="w-full h-full object-cover"
                 />
@@ -516,6 +523,13 @@ export const MangaDetailView: React.FC<MangaDetailViewProps> = ({
                   alt={`${manga.title} o'zbek tilida manga muqovasi (Reyting: ${manga.rating || 5.0}★) - AniManga Uz`}
                   title={`${manga.title} - Reyting: ${manga.rating || 5.0} / 5 ball. AniManga Uz platformasida o'zbek tilida bepul o'qing.`}
                   loading="eager"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (manga.cover_image && !img.src.includes('/api/image-proxy')) {
+                      img.src = `/api/image-proxy?url=${encodeURIComponent(manga.cover_image)}`;
+                    }
+                  }}
                   itemProp="image"
                   className="w-full rounded-2xl shadow-2xl shadow-black/80 ring-1 ring-white/10 transition-transform duration-500 group-hover:scale-[1.02] aspect-[3/4.2] object-cover"
                 />

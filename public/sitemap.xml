@@ -3,21 +3,43 @@
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
     <loc>https://animanga.uz/</loc>
-    <lastmod>2026-09-07</lastmod>
+    <lastmod>2026-09-22</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
     <loc>https://animanga.uz/manga</loc>
-    <lastmod>2026-09-07</lastmod>
+    <lastmod>2026-09-22</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
     <loc>https://animanga.uz/genres</loc>
-    <lastmod>2026-09-07</lastmod>
+    <lastmod>2026-09-22</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://animanga.uz/manga/26</loc>
+    <lastmod>2026-09-09</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>/uploads/photo_2026-09-09_16-41-29_jpg_vxuf3w.jpg</image:loc>
+      <image:title>Apakalipsisni boshiga qaytish - O&apos;zbek tilida o&apos;qish (Reyting: 1.0★)</image:title>
+      <image:caption>Yerga noma’lum energiya ta’sir qiladi, yadro kengayadi va tabiiy ofatlar sodir bo‘ladi. Jazirama issiq, zilzila, vulqon otilishi, suv toshqini, qattiq sovuq... Tabiiy va texnogen ofatlar ketma-ket keladi! Su Chen qiyomatdan qiyinchilik bilan omon qoldi va nihoyat xavfsiz hududga yetib keldi. Ammo ox</image:caption>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://animanga.uz/manga/25</loc>
+    <lastmod>2026-09-08</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://litter.catbox.moe/4nc63c.webp</image:loc>
+      <image:title>Mening Hisobimda 90 Milliard Bor - O&apos;zbek tilida o&apos;qish (Reyting: 8.5★)</image:title>
+      <image:caption>chen Yuan 3 yildan beri uchrashib kelayotgan qizi uni bir bir boy yigit uchun tashlab ketdi. Ammo taqdir uning ayanchli holini ko&apos;zdan qochirmadi. &quot;Boylik Sistemasi&quot; Chen Yuanni nomzod deb tan oldi. Bu sistema Chen Yuanga 90 kvadtrilion berdi ammo Chen Yuan bu pullarni faqat qizlarga ishlata oladi v</image:caption>
+    </image:image>
   </url>
   <url>
     <loc>https://animanga.uz/manga/24</loc>

@@ -4,8 +4,14 @@ import { getFirestore, doc, setDoc, getDoc, getDocFromServer } from 'firebase/fi
 import firebaseConfig from '../../firebase-applet-config.json';
 import type { UserProfile } from '../types.js';
 
-// Initialize Firebase App
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+// Initialize Firebase App with customizable authDomain (e.g. auth.animanga.uz)
+const resolvedAuthDomain = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain;
+const effectiveFirebaseConfig = {
+  ...firebaseConfig,
+  authDomain: resolvedAuthDomain,
+};
+
+const app = getApps().length > 0 ? getApp() : initializeApp(effectiveFirebaseConfig);
 
 // CRITICAL: Initialize Firestore with database ID from config
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);

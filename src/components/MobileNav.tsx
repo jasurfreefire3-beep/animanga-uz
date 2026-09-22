@@ -23,10 +23,10 @@ export const MobileNav: React.FC<MobileNavProps> = ({ currentTab, onNavigate, us
 
   return (
     <div className="fixed bottom-3 left-4 right-4 z-50 md:hidden pointer-events-none">
-      <nav className="pointer-events-auto max-w-md mx-auto ios-floating-dock flex items-center justify-around px-3 py-2 shadow-[0_15px_35px_rgba(0,0,0,0.7)]">
+      <nav className="pointer-events-auto max-w-md mx-auto ios-floating-dock flex items-center justify-around px-2 py-2 shadow-[0_15px_35px_rgba(0,0,0,0.7)]">
         <button
           onClick={() => onNavigate('home')}
-          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-2xl text-[10px] font-bold transition-all active:scale-90 ${
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-2xl text-[10px] font-bold transition-all active:scale-90 ${
             currentTab === 'home'
               ? 'text-[#00DC82] bg-white/10 shadow-inner border border-[#00DC82]/30'
               : 'text-white/60 hover:text-white'
@@ -39,7 +39,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ currentTab, onNavigate, us
 
         <button
           onClick={() => onNavigate('manga')}
-          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-2xl text-[10px] font-bold transition-all active:scale-90 ${
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-2xl text-[10px] font-bold transition-all active:scale-90 ${
             currentTab === 'manga'
               ? 'text-[#00DC82] bg-white/10 shadow-inner border border-[#00DC82]/30'
               : 'text-white/60 hover:text-white'
@@ -52,7 +52,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ currentTab, onNavigate, us
 
         <button
           onClick={() => onNavigate('genres')}
-          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-2xl text-[10px] font-bold transition-all active:scale-90 ${
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-2xl text-[10px] font-bold transition-all active:scale-90 ${
             currentTab === 'genres'
               ? 'text-[#00DC82] bg-white/10 shadow-inner border border-[#00DC82]/30'
               : 'text-white/60 hover:text-white'
@@ -65,7 +65,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ currentTab, onNavigate, us
 
         <button
           onClick={handleProfileClick}
-          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-2xl text-[10px] font-bold transition-all active:scale-90 ${
+          className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-2xl text-[10px] font-bold transition-all active:scale-90 ${
             currentTab === 'profile' && user
               ? 'text-[#00DC82] bg-white/10 shadow-inner border border-[#00DC82]/30'
               : 'text-white/60 hover:text-white'

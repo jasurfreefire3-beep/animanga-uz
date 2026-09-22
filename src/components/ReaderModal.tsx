@@ -588,8 +588,15 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
                     className="w-full h-auto block select-none p-0 m-0 border-0 align-bottom"
                     style={{ display: 'block', margin: 0, padding: 0, border: 'none', verticalAlign: 'bottom' }}
                     loading={idx < 4 ? 'eager' : 'lazy'}
-                    onError={() => {
-                      setImageErrors((prev) => ({ ...prev, [idx]: true }));
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      const proxySrc = `/api/image-proxy?url=${encodeURIComponent(imgUrl)}`;
+                      if (!img.src.includes('/api/image-proxy')) {
+                        img.src = proxySrc;
+                      } else {
+                        setImageErrors((prev) => ({ ...prev, [idx]: true }));
+                      }
                     }}
                   />
                 )}

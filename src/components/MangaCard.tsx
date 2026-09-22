@@ -21,6 +21,13 @@ export const MangaCard: React.FC<MangaCardProps> = ({ manga, onClick }) => {
           src={manga.cover_image}
           alt={manga.title}
           loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={(e) => {
+            const img = e.currentTarget;
+            if (manga.cover_image && !img.src.includes('/api/image-proxy')) {
+              img.src = `/api/image-proxy?url=${encodeURIComponent(manga.cover_image)}`;
+            }
+          }}
           className="w-full h-full object-cover rounded-[16px] transition-all duration-500 ease-out md:group-hover:scale-105 filter group-hover:brightness-110"
         />
 

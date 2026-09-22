@@ -2,7 +2,7 @@ import pg from 'pg';
 import fs from 'fs';
 import path from 'path';
 import { initialGenres, initialMangas, initialChapters } from './initialData.js';
-import type { Manga, Chapter, Genre, DatabaseStatus, UserProfile, CoinTransaction } from '../types.js';
+import type { Manga, Chapter, Genre, DatabaseStatus, UserProfile, CoinTransaction, ChatMessage } from '../types.js';
 
 const { Pool } = pg;
 
@@ -17,6 +17,7 @@ const CHAPTERS_FILE = path.join(DATA_DIR, 'chapters.json');
 const PROFILES_FILE = path.join(DATA_DIR, 'user_profiles.json');
 const TRANSACTIONS_FILE = path.join(DATA_DIR, 'coin_transactions.json');
 const COMMENTS_FILE = path.join(DATA_DIR, 'manga_comments.json');
+const CHAT_FILE = path.join(DATA_DIR, 'chat_messages.json');
 
 export interface MangaComment {
   id: string;
@@ -87,6 +88,31 @@ let memoryUserProfiles: Record<string, UserProfile> = loadJsonFile<Record<string
 let memoryCoinTransactions: CoinTransaction[] = loadJsonFile<CoinTransaction[]>(TRANSACTIONS_FILE, []);
 let memoryComments: MangaComment[] = loadJsonFile<MangaComment[]>(COMMENTS_FILE, []);
 
+const initialChatMessages: ChatMessage[] = [
+  {
+    id: 1,
+    username: 'admin',
+    name: 'Bosh Administrator',
+    avatar_url: 'https://files.catbox.moe/g244x0.jpg',
+    text: 'Assalomu alaykum! AniManga Uz umumiy chatiga xush kelibsiz! 🎉 Bu yerda barcha manga va manhwa ixlosmandlari bilan erkin suhbatlashishingiz mumkin.',
+    is_admin: true,
+    likes: 5,
+    created_at: new Date(Date.now() - 3600000).toISOString(),
+  },
+  {
+    id: 2,
+    username: 'animanga_bot',
+    name: 'AniManga Bot',
+    avatar_url: 'https://files.catbox.moe/8odaud.png',
+    text: 'Chatda bir-biringizni hurmat qiling. Istalgan xabarga javob (reply) berish uchun xabar ustiga bosing yoki reply belgisini tanlang! ⚡',
+    is_admin: true,
+    likes: 3,
+    created_at: new Date(Date.now() - 1800000).toISOString(),
+  }
+];
+
+let memoryChatMessages: ChatMessage[] = loadJsonFile<ChatMessage[]>(CHAT_FILE, initialChatMessages);
+
 let isPgConnected = false;
 let lastPgError: string | null = null;
 
@@ -96,6 +122,7 @@ function persistAllToFiles() {
   saveJsonFile(PROFILES_FILE, memoryUserProfiles);
   saveJsonFile(TRANSACTIONS_FILE, memoryCoinTransactions);
   saveJsonFile(COMMENTS_FILE, memoryComments);
+  saveJsonFile(CHAT_FILE, memoryChatMessages);
 }
 
 export async function initDatabase() {
@@ -214,6 +241,38 @@ export async function initDatabase() {
       );
     `);
 
+    // 7. Create chat_messages table for community chat
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(100) NOT NULL,
+        name VARCHAR(150) NOT NULL,
+        avatar_url TEXT,
+        text TEXT NOT NULL,
+        reply_to_id INT,
+        reply_to_name VARCHAR(150),
+        reply_to_text TEXT,
+        is_admin BOOLEAN DEFAULT FALSE,
+        likes INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 8. Create media_storage table for permanent database mirror of all uploaded & Catbox images
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS media_storage (
+        id SERIAL PRIMARY KEY,
+        file_key VARCHAR(255) UNIQUE NOT NULL,
+        original_url TEXT,
+        mime_type VARCHAR(100) DEFAULT 'image/jpeg',
+        data TEXT NOT NULL,
+        file_size INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_media_storage_key ON media_storage (file_key);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_media_storage_url ON media_storage (original_url);`);
+
     // Check if genres table needs initial categories
     const genreRes = await client.query('SELECT COUNT(*) FROM genres');
     if (parseInt(genreRes.rows[0].count, 10) === 0) {
@@ -273,6 +332,64 @@ export async function initDatabase() {
           ]
         );
       }
+    }
+
+    // Sync chat messages
+    const pgChatRes = await client.query('SELECT * FROM chat_messages ORDER BY id ASC LIMIT 200');
+    if (pgChatRes.rows.length > 0) {
+      memoryChatMessages = pgChatRes.rows.map(row => ({
+        id: Number(row.id),
+        username: row.username,
+        name: row.name,
+        avatar_url: row.avatar_url,
+        text: row.text,
+        reply_to_id: row.reply_to_id ? Number(row.reply_to_id) : null,
+        reply_to_name: row.reply_to_name,
+        reply_to_text: row.reply_to_text,
+        is_admin: Boolean(row.is_admin),
+        likes: Number(row.likes || 0),
+        created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+      }));
+      persistAllToFiles();
+    } else if (memoryChatMessages.length > 0) {
+      for (const msg of memoryChatMessages) {
+        await client.query(
+          `INSERT INTO chat_messages (id, username, name, avatar_url, text, reply_to_id, reply_to_name, reply_to_text, is_admin, likes, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           ON CONFLICT (id) DO NOTHING`,
+          [
+            msg.id, msg.username, msg.name, msg.avatar_url || '', msg.text,
+            msg.reply_to_id || null, msg.reply_to_name || null, msg.reply_to_text || null,
+            !!msg.is_admin, msg.likes || 0, msg.created_at || new Date().toISOString()
+          ]
+        );
+      }
+    }
+
+    // Always synchronize sequences so new auto-incrementing inserts never conflict with explicitly inserted IDs
+    try {
+      await client.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'chat_messages_id_seq') THEN
+            PERFORM setval('chat_messages_id_seq', GREATEST(COALESCE((SELECT MAX(id) FROM chat_messages), 0), 1));
+          END IF;
+          IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'mangas_id_seq') THEN
+            PERFORM setval('mangas_id_seq', GREATEST(COALESCE((SELECT MAX(id) FROM mangas), 0), 1));
+          END IF;
+          IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'chapters_id_seq') THEN
+            PERFORM setval('chapters_id_seq', GREATEST(COALESCE((SELECT MAX(id) FROM chapters), 0), 1));
+          END IF;
+          IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'genres_id_seq') THEN
+            PERFORM setval('genres_id_seq', GREATEST(COALESCE((SELECT MAX(id) FROM genres), 0), 1));
+          END IF;
+          IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'media_storage_id_seq') THEN
+            PERFORM setval('media_storage_id_seq', GREATEST(COALESCE((SELECT MAX(id) FROM media_storage), 0), 1));
+          END IF;
+        END $$;
+      `);
+    } catch (seqErr) {
+      console.warn('[PostgreSQL Sequence Sync Warning]', seqErr);
     }
 
     client.release();
@@ -1347,4 +1464,319 @@ export async function deleteMangaComment(commentId: string | number, username: s
   });
   persistAllToFiles();
   return { success: true };
+}
+
+// ==========================================
+// Community Chat Database Methods
+// ==========================================
+export async function getChatMessages(limit = 100): Promise<ChatMessage[]> {
+  if (isPgConnected) {
+    try {
+      const client = await pool.connect();
+      const res = await client.query('SELECT * FROM chat_messages ORDER BY id DESC LIMIT $1', [limit]);
+      client.release();
+      if (res.rows.length > 0) {
+        return res.rows.reverse().map(row => ({
+          id: Number(row.id),
+          username: row.username,
+          name: row.name,
+          avatar_url: row.avatar_url,
+          text: row.text,
+          reply_to_id: row.reply_to_id ? Number(row.reply_to_id) : null,
+          reply_to_name: row.reply_to_name,
+          reply_to_text: row.reply_to_text,
+          is_admin: Boolean(row.is_admin),
+          likes: Number(row.likes || 0),
+          created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+        }));
+      }
+    } catch (err) {
+      console.error('[PostgreSQL getChatMessages error]', err);
+    }
+  }
+
+  return memoryChatMessages.slice(-limit);
+}
+
+export async function createChatMessage(data: {
+  username: string;
+  name: string;
+  avatar_url?: string;
+  text: string;
+  reply_to_id?: number | null;
+  reply_to_name?: string | null;
+  reply_to_text?: string | null;
+  is_admin?: boolean;
+}): Promise<ChatMessage> {
+  const profile = await getUserProfile(data.username);
+  const authorName = data.name || profile.name || data.username;
+  const authorAvatar = data.avatar_url || profile.avatar_url || '';
+  const isAdmin = Boolean(data.is_admin || profile.isAdmin);
+  const cleanText = (data.text || '').trim();
+
+  let insertedId: number | null = null;
+  let createdAtStr = new Date().toISOString();
+
+  if (isPgConnected) {
+    try {
+      const client = await pool.connect();
+      try {
+        const res = await client.query(
+          `INSERT INTO chat_messages (username, name, avatar_url, text, reply_to_id, reply_to_name, reply_to_text, is_admin, likes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0)
+           RETURNING *`,
+          [
+            data.username,
+            authorName,
+            authorAvatar,
+            cleanText,
+            data.reply_to_id || null,
+            data.reply_to_name || null,
+            data.reply_to_text || null,
+            isAdmin,
+          ]
+        );
+        if (res.rows.length > 0) {
+          insertedId = Number(res.rows[0].id);
+          createdAtStr = res.rows[0].created_at ? new Date(res.rows[0].created_at).toISOString() : createdAtStr;
+        }
+      } catch (queryErr: any) {
+        // If the sequence fell behind due to explicit ID imports, reset sequence and retry immediately
+        if (queryErr.code === '23505' || String(queryErr.message).includes('chat_messages_pkey')) {
+          console.warn('[PostgreSQL createChatMessage] Resolving chat_messages_pkey collision by synchronizing sequence...');
+          await client.query(`
+            SELECT setval(pg_get_serial_sequence('chat_messages', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM chat_messages), 0), 1));
+          `);
+          const retryRes = await client.query(
+            `INSERT INTO chat_messages (username, name, avatar_url, text, reply_to_id, reply_to_name, reply_to_text, is_admin, likes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0)
+             RETURNING *`,
+            [
+              data.username,
+              authorName,
+              authorAvatar,
+              cleanText,
+              data.reply_to_id || null,
+              data.reply_to_name || null,
+              data.reply_to_text || null,
+              isAdmin,
+            ]
+          );
+          if (retryRes.rows.length > 0) {
+            insertedId = Number(retryRes.rows[0].id);
+            createdAtStr = retryRes.rows[0].created_at ? new Date(retryRes.rows[0].created_at).toISOString() : createdAtStr;
+          }
+        } else {
+          throw queryErr;
+        }
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      console.error('[PostgreSQL createChatMessage error]', err);
+    }
+  }
+
+  const nextId = insertedId || (memoryChatMessages.length > 0 ? Math.max(...memoryChatMessages.map(m => m.id)) + 1 : 1);
+  const newMsg: ChatMessage = {
+    id: nextId,
+    username: data.username,
+    name: authorName,
+    avatar_url: authorAvatar,
+    text: cleanText,
+    reply_to_id: data.reply_to_id || null,
+    reply_to_name: data.reply_to_name || null,
+    reply_to_text: data.reply_to_text || null,
+    is_admin: isAdmin,
+    likes: 0,
+    created_at: createdAtStr,
+  };
+
+  memoryChatMessages.push(newMsg);
+  if (memoryChatMessages.length > 500) {
+    memoryChatMessages = memoryChatMessages.slice(-500);
+  }
+  persistAllToFiles();
+  return newMsg;
+}
+
+export async function deleteChatMessage(id: number, username: string, isAdmin?: boolean): Promise<{ success: boolean }> {
+  if (isPgConnected) {
+    try {
+      const client = await pool.connect();
+      if (isAdmin) {
+        await client.query('DELETE FROM chat_messages WHERE id = $1', [id]);
+      } else {
+        await client.query('DELETE FROM chat_messages WHERE id = $1 AND LOWER(username) = LOWER($2)', [id, username]);
+      }
+      client.release();
+    } catch (err) {
+      console.error('[PostgreSQL deleteChatMessage error]', err);
+    }
+  }
+
+  memoryChatMessages = memoryChatMessages.filter(m => {
+    if (m.id === id) {
+      if (isAdmin || m.username.toLowerCase() === username.toLowerCase()) {
+        return false;
+      }
+    }
+    return true;
+  });
+  persistAllToFiles();
+  return { success: true };
+}
+
+export async function likeChatMessage(id: number): Promise<{ success: boolean; likes: number }> {
+  if (isPgConnected) {
+    try {
+      const client = await pool.connect();
+      const res = await client.query('UPDATE chat_messages SET likes = likes + 1 WHERE id = $1 RETURNING likes', [id]);
+      client.release();
+      if (res.rows.length > 0) {
+        const newLikes = Number(res.rows[0].likes || 0);
+        const mem = memoryChatMessages.find(m => m.id === id);
+        if (mem) mem.likes = newLikes;
+        persistAllToFiles();
+        return { success: true, likes: newLikes };
+      }
+    } catch (err) {
+      console.error('[PostgreSQL likeChatMessage error]', err);
+    }
+  }
+
+  const mem = memoryChatMessages.find(m => m.id === id);
+  if (mem) {
+    mem.likes = (mem.likes || 0) + 1;
+    persistAllToFiles();
+    return { success: true, likes: mem.likes };
+  }
+  return { success: false, likes: 0 };
+}
+
+/**
+ * Save an uploaded or proxied image to PostgreSQL media_storage for permanent backup.
+ * Even if Catbox deletes the file or is blocked, this database backup guarantees
+ * that images never disappear.
+ */
+export async function saveMediaBackup(
+  fileKey: string,
+  mimeType: string,
+  buffer: Buffer,
+  originalUrl?: string
+): Promise<boolean> {
+  const base64Data = buffer.toString('base64');
+  const fileSize = buffer.length;
+
+  if (isPgConnected) {
+    try {
+      const client = await pool.connect();
+      await client.query(
+        `INSERT INTO media_storage (file_key, original_url, mime_type, data, file_size)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (file_key) 
+         DO UPDATE SET original_url = COALESCE(EXCLUDED.original_url, media_storage.original_url),
+                       data = EXCLUDED.data,
+                       mime_type = EXCLUDED.mime_type,
+                       file_size = EXCLUDED.file_size`,
+        [fileKey, originalUrl || null, mimeType, base64Data, fileSize]
+      );
+      client.release();
+      return true;
+    } catch (err) {
+      console.warn('[PostgreSQL saveMediaBackup warning]:', err);
+    }
+  }
+  return false;
+}
+
+/**
+ * Retrieve backed up media from PostgreSQL media_storage by file_key or original_url.
+ */
+export async function getMediaBackup(
+  fileKeyOrUrl: string
+): Promise<{ mimeType: string; buffer: Buffer } | null> {
+  if (isPgConnected) {
+    try {
+      const client = await pool.connect();
+      const res = await client.query(
+        `SELECT mime_type, data FROM media_storage 
+         WHERE file_key = $1 OR original_url = $1 OR original_url LIKE '%' || $1
+         LIMIT 1`,
+        [fileKeyOrUrl]
+      );
+      client.release();
+      if (res.rows.length > 0) {
+        const row = res.rows[0];
+        const buffer = Buffer.from(row.data, 'base64');
+        return { mimeType: row.mime_type || 'image/jpeg', buffer };
+      }
+    } catch (err) {
+      console.warn('[PostgreSQL getMediaBackup warning]:', err);
+    }
+  }
+  return null;
+}
+
+/**
+ * Retrieve all Catbox image URLs found in mangas, chapters, and user profiles
+ * so they can be pre-cached and permanently backed up in PostgreSQL and disk.
+ */
+export async function getAllCatboxUrlsFromDb(): Promise<string[]> {
+  const catboxUrls = new Set<string>();
+
+  // Check in-memory / file mangas
+  for (const m of memoryMangas) {
+    if (m.cover_image && m.cover_image.includes('catbox.moe/')) {
+      catboxUrls.add(m.cover_image.trim());
+    }
+  }
+
+  // Check in-memory / file chapters
+  for (const c of memoryChapters) {
+    if (Array.isArray(c.pages)) {
+      for (const p of c.pages) {
+        if (typeof p === 'string' && p.includes('catbox.moe/')) {
+          catboxUrls.add(p.trim());
+        }
+      }
+    }
+  }
+
+  // Check in-memory user profiles
+  for (const u of Object.values(memoryUserProfiles)) {
+    if (u.avatar_url && u.avatar_url.includes('catbox.moe/')) {
+      catboxUrls.add(u.avatar_url.trim());
+    }
+  }
+
+  // Also query PostgreSQL directly if connected
+  if (isPgConnected) {
+    try {
+      const client = await pool.connect();
+      const mangaRes = await client.query("SELECT cover_image FROM mangas WHERE cover_image LIKE '%catbox.moe%'");
+      for (const row of mangaRes.rows) {
+        if (row.cover_image) catboxUrls.add(row.cover_image.trim());
+      }
+
+      const chapterRes = await client.query("SELECT pages FROM chapters WHERE pages::text LIKE '%catbox.moe%'");
+      for (const row of chapterRes.rows) {
+        if (Array.isArray(row.pages)) {
+          for (const p of row.pages) {
+            if (typeof p === 'string' && p.includes('catbox.moe/')) catboxUrls.add(p.trim());
+          }
+        }
+      }
+
+      const profileRes = await client.query("SELECT avatar_url FROM user_profiles WHERE avatar_url LIKE '%catbox.moe%'");
+      for (const row of profileRes.rows) {
+        if (row.avatar_url) catboxUrls.add(row.avatar_url.trim());
+      }
+      client.release();
+    } catch (err) {
+      console.warn('[getAllCatboxUrlsFromDb warning]:', err);
+    }
+  }
+
+  return Array.from(catboxUrls);
 }

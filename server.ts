@@ -1,6 +1,8 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import fs from 'fs';
+import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
 import {
   initDatabase,
@@ -24,6 +26,10 @@ import {
   addMangaComment,
   likeMangaComment,
   deleteMangaComment,
+  getChatMessages,
+  createChatMessage,
+  deleteChatMessage,
+  likeChatMessage,
   getAllGenres,
   getUserProfile,
   saveUserProfile,
@@ -31,6 +37,9 @@ import {
   getCoinTransaction,
   markCoinTransactionPaid,
   getUserCoinTransactions,
+  saveMediaBackup,
+  getMediaBackup,
+  getAllCatboxUrlsFromDb,
 } from './src/server/db.ts';
 import {
   initTelegramBot,
@@ -45,12 +54,34 @@ async function startServer() {
   app.use(express.json({ limit: '25mb' }));
   app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
-  // Static directory for uploaded media
+  // Static directory for uploaded media with resilient PostgreSQL database recovery
   const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
   app.use('/uploads', express.static(uploadsDir));
+  app.get('/uploads/:filename', async (req, res, next) => {
+    try {
+      const filename = path.basename(req.params.filename);
+      const localFilePath = path.join(uploadsDir, filename);
+      if (fs.existsSync(localFilePath)) {
+        return res.sendFile(localFilePath);
+      }
+      // If not on local disk (e.g. after container redeploy), restore instantly from PostgreSQL media_storage
+      const backup = await getMediaBackup(filename);
+      if (backup && backup.buffer) {
+        try {
+          fs.writeFileSync(localFilePath, backup.buffer);
+        } catch {}
+        res.setHeader('Content-Type', backup.mimeType || 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return res.send(backup.buffer);
+      }
+    } catch (e) {
+      console.warn('[Uploads recovery warning]:', e);
+    }
+    next();
+  });
 
   // XML escaping helper for Sitemap
   function escapeXml(unsafe: string | null | undefined): string {
@@ -393,7 +424,7 @@ async function startServer() {
     }
   });
 
-  // Catbox.moe / Avatar file upload route (Multi-tier resilient uploader)
+  // Catbox.moe / Media file upload route (Permanent dual-persistence uploader)
   app.post('/api/upload/catbox', async (req, res) => {
     res.type('application/json');
     try {
@@ -419,77 +450,161 @@ async function startServer() {
       }
 
       const randomSuffix = Math.random().toString(36).substring(2, 8);
-      const safeBase = (fileName || `avatar_${Date.now()}`)
+      const safeBase = (fileName || `media_${Date.now()}`)
         .replace(/[^a-zA-Z0-9_-]/g, '_')
         .substring(0, 30);
       const uploadName = `${safeBase}_${randomSuffix}.${extension}`;
 
+      // 1. Dual persistence: Always save to local server static directory FIRST
+      const localFilePath = path.join(uploadsDir, uploadName);
+      fs.writeFileSync(localFilePath, buffer);
+      const localUrl = `/uploads/${uploadName}`;
+
+      // 2. Also back up locally to PostgreSQL media_storage so it survives container restarts
+      await saveMediaBackup(uploadName, mimeType, buffer, localUrl);
+
       let uploadedUrl: string | null = null;
+      let catboxFilename: string | null = null;
 
-      // 1. Try permanent Catbox.moe endpoint first
-      try {
-        const blob = new Blob([buffer], { type: mimeType });
-        const formData = new FormData();
-        formData.append('reqtype', 'fileupload');
-        if (process.env.CATBOX_USERHASH) {
-          formData.append('userhash', process.env.CATBOX_USERHASH);
-        }
-        formData.append('fileToUpload', blob, uploadName);
-
-        const catboxRes = await fetch('https://catbox.moe/user/api.php', {
-          method: 'POST',
-          body: formData,
-        });
-
-        const respText = (await catboxRes.text()).trim();
-        if (catboxRes.ok && respText.startsWith('http')) {
-          uploadedUrl = respText;
-          console.log('[Catbox Standard Success]:', uploadedUrl);
-        } else {
-          console.warn('[Catbox Standard Response]:', respText);
-        }
-      } catch (err: any) {
-        console.warn('[Catbox Standard Warning]:', err?.message || err);
-      }
-
-      // 2. If standard Catbox was unreachable, try Litterbox (Catbox.moe temporary API)
-      if (!uploadedUrl) {
+      // 3. Try permanent Catbox.moe endpoint (never Litterbox, which wipes files after 72h)
+      for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           const blob = new Blob([buffer], { type: mimeType });
           const formData = new FormData();
           formData.append('reqtype', 'fileupload');
-          formData.append('time', '72h');
+          if (process.env.CATBOX_USERHASH) {
+            formData.append('userhash', process.env.CATBOX_USERHASH);
+          }
           formData.append('fileToUpload', blob, uploadName);
 
-          const litterboxRes = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+          const catboxRes = await fetch('https://catbox.moe/user/api.php', {
             method: 'POST',
             body: formData,
+            signal: controller.signal,
           });
+          clearTimeout(timeoutId);
 
-          const respText = (await litterboxRes.text()).trim();
-          if (litterboxRes.ok && respText.startsWith('http')) {
+          const respText = (await catboxRes.text()).trim();
+          if (catboxRes.ok && respText.startsWith('http')) {
             uploadedUrl = respText;
-            console.log('[Litterbox Catbox Success]:', uploadedUrl);
+            const parts = uploadedUrl.split('/');
+            catboxFilename = parts[parts.length - 1].split('?')[0];
+
+            // Save under Catbox filename on local disk & PostgreSQL as well for instant cache hits
+            if (catboxFilename) {
+              const catboxLocalPath = path.join(uploadsDir, catboxFilename);
+              try {
+                fs.writeFileSync(catboxLocalPath, buffer);
+              } catch {}
+              await saveMediaBackup(catboxFilename, mimeType, buffer, uploadedUrl);
+            }
+
+            console.log(`[Catbox Permanent Success (Attempt ${attempt})]:`, uploadedUrl);
+            break;
           } else {
-            console.warn('[Litterbox Catbox Response]:', respText);
+            console.warn(`[Catbox Response Attempt ${attempt}]:`, respText);
           }
         } catch (err: any) {
-          console.warn('[Litterbox Catbox Warning]:', err?.message || err);
+          console.warn(`[Catbox Attempt ${attempt} warning]:`, err?.message || err);
         }
       }
 
-      // 3. Fallback: Save directly to server static directory so avatar upload NEVER fails!
-      if (!uploadedUrl) {
-        const localFilePath = path.join(uploadsDir, uploadName);
-        fs.writeFileSync(localFilePath, buffer);
-        uploadedUrl = `/uploads/${uploadName}`;
-        console.log('[Local Storage Fallback]: Saved avatar to', uploadedUrl);
+      // If Catbox succeeded, return the permanent Catbox URL
+      // If Catbox was temporarily down, return our permanent local server URL (/uploads/...)
+      const finalUrl = uploadedUrl || localUrl;
+      console.log('[Media Upload Complete]: Served as', finalUrl, 'with local & PostgreSQL backup');
+
+      return res.json({
+        url: finalUrl,
+        catboxUrl: uploadedUrl,
+        localUrl: localUrl,
+        isPermanent: true,
+      });
+    } catch (err: any) {
+      console.error('[Media Upload Exception]', err);
+      return res.status(500).json({ error: err.message || 'Rasm yuklashda xatolik yuz berdi' });
+    }
+  });
+
+  // Resilient Image Proxy & Mirror
+  // Prevents image breaks from ISP blocks, referer restrictions, or Catbox downtime
+  app.get('/api/image-proxy', async (req, res) => {
+    try {
+      const targetUrl = req.query.url as string;
+      if (!targetUrl || typeof targetUrl !== 'string') {
+        return res.status(400).send('Missing url parameter');
       }
 
-      return res.json({ url: uploadedUrl });
+      if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+        return res.status(400).send('Invalid url protocol');
+      }
+
+      // Check for filename in URL
+      const parts = targetUrl.split('/');
+      const filename = path.basename(parts[parts.length - 1].split('?')[0]);
+
+      // 1. Check local disk first
+      if (filename) {
+        const localPath = path.join(uploadsDir, filename);
+        if (fs.existsSync(localPath)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          const ext = path.extname(filename).toLowerCase();
+          if (ext === '.png') res.type('image/png');
+          else if (ext === '.gif') res.type('image/gif');
+          else if (ext === '.webp') res.type('image/webp');
+          else res.type('image/jpeg');
+          return res.sendFile(localPath);
+        }
+      }
+
+      // 2. Check PostgreSQL media_storage backup
+      const backup = await getMediaBackup(filename || targetUrl);
+      if (backup && backup.buffer) {
+        if (filename) {
+          try {
+            fs.writeFileSync(path.join(uploadsDir, filename), backup.buffer);
+          } catch {}
+        }
+        res.setHeader('Content-Type', backup.mimeType || 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return res.send(backup.buffer);
+      }
+
+      // 3. Fetch from remote with browser-like headers (no referer, bypass ISP/CORS blocks)
+      const remoteRes = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        },
+      });
+
+      if (!remoteRes.ok) {
+        return res.status(remoteRes.status).send('Remote image fetch failed');
+      }
+
+      const contentType = remoteRes.headers.get('content-type') || 'image/jpeg';
+      const arrayBuffer = await remoteRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      // Permanently save to disk and PostgreSQL so it NEVER gets lost in future
+      if (filename) {
+        try {
+          fs.writeFileSync(path.join(uploadsDir, filename), buffer);
+          await saveMediaBackup(filename, contentType, buffer, targetUrl);
+        } catch (saveErr) {
+          console.warn('[Proxy Save Warning]:', saveErr);
+        }
+      }
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      return res.send(buffer);
     } catch (err: any) {
-      console.error('[Avatar Upload Exception]', err);
-      return res.status(500).json({ error: err.message || 'Avatar yuklashda xatolik yuz berdi' });
+      console.error('[Image Proxy Error]:', err);
+      return res.status(500).send('Image proxy error: ' + (err.message || 'unknown'));
     }
   });
 
@@ -763,9 +878,296 @@ app.patch('/api/chapters/:id/price', async (req, res) => {
     }
   });
 
-  // Kick off DB connection and Telegram Bot
+  // ==========================================
+  // TELEGRAM-STYLE REAL-TIME COMMUNITY CHAT
+  // ==========================================
+  const server = http.createServer(app);
+  const wss = new WebSocketServer({ server, path: '/ws/chat' });
+
+  interface ConnectedChatClient {
+    ws: WebSocket;
+    username?: string;
+    name?: string;
+  }
+
+  const chatClients = new Set<ConnectedChatClient>();
+  const activeTypers = new Map<string, { username: string; name: string; expiresAt: number }>();
+
+  function broadcastChat(payload: any, skipWs?: WebSocket) {
+    const data = JSON.stringify(payload);
+    for (const client of chatClients) {
+      if (client.ws.readyState === WebSocket.OPEN && client.ws !== skipWs) {
+        try {
+          client.ws.send(data);
+        } catch (err) {
+          console.error('[WS Broadcast Error]', err);
+        }
+      }
+    }
+  }
+
+  function getActiveTypersList() {
+    const now = Date.now();
+    const typers: { username: string; name: string }[] = [];
+    for (const [uname, info] of activeTypers.entries()) {
+      if (info.expiresAt > now) {
+        typers.push({ username: info.username, name: info.name });
+      } else {
+        activeTypers.delete(uname);
+      }
+    }
+    return typers;
+  }
+
+  function broadcastTypingStatus() {
+    const typers = getActiveTypersList();
+    broadcastChat({
+      type: 'typing_users',
+      users: typers,
+    });
+  }
+
+  wss.on('connection', (ws) => {
+    const clientInfo: ConnectedChatClient = { ws };
+    chatClients.add(clientInfo);
+
+    // Send initial state to newly connected client
+    ws.send(JSON.stringify({
+      type: 'init',
+      online_count: Math.max(1, chatClients.size),
+      typing_users: getActiveTypersList(),
+    }));
+
+    // Broadcast online count update
+    broadcastChat({
+      type: 'online_count',
+      online_count: Math.max(1, chatClients.size),
+    });
+
+    ws.on('message', async (rawMessage) => {
+      try {
+        const data = JSON.parse(rawMessage.toString());
+        if (data.type === 'ping') {
+          ws.send(JSON.stringify({ type: 'pong' }));
+          return;
+        }
+
+        if (data.type === 'identify') {
+          clientInfo.username = data.username;
+          clientInfo.name = data.name;
+          return;
+        }
+
+        if (data.type === 'typing') {
+          const { username, name, isTyping } = data;
+          if (!username) return;
+          if (isTyping) {
+            activeTypers.set(username, {
+              username,
+              name: name || username,
+              expiresAt: Date.now() + 3500,
+            });
+          } else {
+            activeTypers.delete(username);
+          }
+          broadcastTypingStatus();
+          return;
+        }
+
+        if (data.type === 'send_message') {
+          const { username, name, avatar_url, text, reply_to_id, reply_to_name, reply_to_text, is_admin } = data;
+          if (!text || !text.trim() || !username) return;
+
+          activeTypers.delete(username);
+          broadcastTypingStatus();
+
+          const created = await createChatMessage({
+            username,
+            name: name || username,
+            avatar_url,
+            text: text.trim(),
+            reply_to_id: reply_to_id || null,
+            reply_to_name: reply_to_name || null,
+            reply_to_text: reply_to_text || null,
+            is_admin: Boolean(is_admin),
+          });
+
+          broadcastChat({
+            type: 'new_message',
+            message: created,
+          });
+        }
+      } catch (err) {
+        console.error('[WS Message Handle Error]', err);
+      }
+    });
+
+    ws.on('close', () => {
+      chatClients.delete(clientInfo);
+      if (clientInfo.username) {
+        activeTypers.delete(clientInfo.username);
+        broadcastTypingStatus();
+      }
+      broadcastChat({
+        type: 'online_count',
+        online_count: Math.max(1, chatClients.size),
+      });
+    });
+
+    ws.on('error', (err) => {
+      console.error('[WS Client Error]', err);
+      chatClients.delete(clientInfo);
+    });
+  });
+
+  // REST API Endpoints for rock-solid stability and fallback
+  app.get('/api/chat/messages', async (req, res) => {
+    try {
+      const limit = parseInt(String(req.query.limit || '100'), 10);
+      const messages = await getChatMessages(limit);
+      res.json({
+        messages,
+        online_count: Math.max(1, chatClients.size),
+        typing_users: getActiveTypersList(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/chat/send', async (req, res) => {
+    try {
+      const { username, name, avatar_url, text, reply_to_id, reply_to_name, reply_to_text, is_admin } = req.body;
+      if (!text || !text.trim() || !username) {
+        return res.status(400).json({ error: "Xabar matni va foydalanuvchi kiritilishi shart" });
+      }
+
+      activeTypers.delete(username);
+      broadcastTypingStatus();
+
+      const created = await createChatMessage({
+        username,
+        name: name || username,
+        avatar_url,
+        text: text.trim(),
+        reply_to_id: reply_to_id || null,
+        reply_to_name: reply_to_name || null,
+        reply_to_text: reply_to_text || null,
+        is_admin: Boolean(is_admin),
+      });
+
+      broadcastChat({
+        type: 'new_message',
+        message: created,
+      });
+
+      res.json(created);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/chat/typing', (req, res) => {
+    const { username, name, isTyping } = req.body;
+    if (!username) return res.json({ success: true });
+
+    if (isTyping !== false) {
+      activeTypers.set(username, {
+        username,
+        name: name || username,
+        expiresAt: Date.now() + 3500,
+      });
+    } else {
+      activeTypers.delete(username);
+    }
+
+    broadcastTypingStatus();
+    res.json({ success: true, typing_users: getActiveTypersList() });
+  });
+
+  app.delete('/api/chat/messages/:id', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { username, isAdmin } = req.body;
+      await deleteChatMessage(id, username, isAdmin);
+
+      broadcastChat({
+        type: 'message_deleted',
+        id,
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/chat/like/:id', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const result = await likeChatMessage(id);
+
+      broadcastChat({
+        type: 'message_liked',
+        id,
+        likes: result.likes,
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Resilient background sync: ensures all Catbox images in database are mirrored to local disk & PostgreSQL
+  async function backupAllCatboxImages() {
+    try {
+      const urls = await getAllCatboxUrlsFromDb();
+      if (urls.length === 0) return;
+      console.log(`[Catbox Backup] Checking ${urls.length} images for permanent local & PostgreSQL backup...`);
+      for (const url of urls) {
+        try {
+          const parts = url.split('/');
+          const filename = path.basename(parts[parts.length - 1].split('?')[0]);
+          if (!filename) continue;
+          const localPath = path.join(uploadsDir, filename);
+
+          // If file not on disk, check PostgreSQL first
+          if (!fs.existsSync(localPath)) {
+            const fromDb = await getMediaBackup(filename);
+            if (fromDb && fromDb.buffer) {
+              fs.writeFileSync(localPath, fromDb.buffer);
+              continue;
+            }
+
+            // Otherwise fetch from remote Catbox and save to disk & PostgreSQL
+            const res = await fetch(url, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              },
+            });
+            if (res.ok) {
+              const arrayBuffer = await res.arrayBuffer();
+              const buffer = Buffer.from(arrayBuffer);
+              const contentType = res.headers.get('content-type') || 'image/jpeg';
+              fs.writeFileSync(localPath, buffer);
+              await saveMediaBackup(filename, contentType, buffer, url);
+              console.log(`[Catbox Backup] Cloned & secured ${filename}`);
+            }
+          }
+        } catch {
+          // silently continue
+        }
+      }
+    } catch (err) {
+      console.warn('[Catbox Background Backup Warning]:', err);
+    }
+  }
+
+  // Kick off DB connection, Sitemap sync, and Catbox Image Backup
   initDatabase().then(() => {
     syncSitemapFile().catch(() => {});
+    backupAllCatboxImages().catch(() => {});
   }).catch(err => {
     console.error('[Database init warning]', err);
   });
@@ -789,8 +1191,8 @@ app.patch('/api/chapters/:id/price', async (req, res) => {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server with WebSockets running on http://0.0.0.0:${PORT}`);
   });
 }
 

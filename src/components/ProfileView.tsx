@@ -142,9 +142,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   <img
                     src={profile.avatar_url}
                     alt={profile.name}
+                    referrerPolicy="no-referrer"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src = 'https://files.catbox.moe/g244x0.jpg';
+                      const img = e.currentTarget;
+                      if (profile.avatar_url && !img.src.includes('/api/image-proxy')) {
+                        img.src = `/api/image-proxy?url=${encodeURIComponent(profile.avatar_url)}`;
+                      } else {
+                        img.src = 'https://files.catbox.moe/g244x0.jpg';
+                      }
                     }}
                   />
                 ) : (
