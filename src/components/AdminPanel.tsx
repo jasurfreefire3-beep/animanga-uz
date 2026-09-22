@@ -21,10 +21,17 @@ import {
   Check,
   X,
   Loader2,
-  Sparkles
+  Sparkles,
+  Users,
+  Coins,
+  Copy,
+  UserCheck,
+  ShieldCheck,
+  DollarSign
 } from 'lucide-react';
-import type { Manga, Chapter, Genre, DatabaseStatus } from '../types.js';
+import type { Manga, Chapter, Genre, DatabaseStatus, UserProfile } from '../types.js';
 import { uploadToCatbox } from '../lib/profileStorage.js';
+import { VerifiedBadge } from './VerifiedBadge.js';
 
 interface AdminPanelProps {
   onBackToSite: () => void;
@@ -43,10 +50,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   mangas,
   onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'mangas' | 'chapters' | 'genres' | 'database'>('mangas');
+  const [activeTab, setActiveTab] = useState<'mangas' | 'chapters' | 'genres' | 'users' | 'database'>('mangas');
   const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  // Users Management State
+  const [usersList, setUsersList] = useState<UserProfile[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [coinModal, setCoinModal] = useState<{
+    isOpen: boolean;
+    user: UserProfile | null;
+    action: 'add' | 'deduct' | 'set';
+    amount: number;
+    grantVerification: boolean;
+  }>({
+    isOpen: false,
+    user: null,
+    action: 'add',
+    amount: 100,
+    grantVerification: true,
+  });
+  const [isAdjustingCoins, setIsAdjustingCoins] = useState(false);
+  const [quickLookupId, setQuickLookupId] = useState('');
+  const [copiedUserId, setCopiedUserId] = useState<number | null>(null);
 
   // Manga creation / edit state
   const [showMangaModal, setShowMangaModal] = useState(false);
@@ -149,10 +177,104 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  const fetchUsersList = async () => {
+    setIsLoadingUsers(true);
+    try {
+      const res = await fetch('/api/admin/users');
+      if (res.ok) {
+        const data = await res.json();
+        setUsersList(Array.isArray(data) ? data : []);
+      }
+    } catch (err: any) {
+      console.error('fetchUsersList error:', err);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
   useEffect(() => {
     fetchDbStatus();
     fetchChapters();
+    fetchUsersList();
   }, []);
+
+  const handleOpenCoinModal = (u: UserProfile) => {
+    setCoinModal({
+      isOpen: true,
+      user: u,
+      action: 'add',
+      amount: 100,
+      grantVerification: true,
+    });
+  };
+
+  const handleExecuteCoinAdjust = async () => {
+    if (!coinModal.user) return;
+    setIsAdjustingCoins(true);
+    try {
+      const identifier = coinModal.user.short_id || coinModal.user.username;
+      const res = await fetch('/api/admin/users/adjust-coins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: identifier,
+          amount: coinModal.amount,
+          action: coinModal.action,
+          grantVerification: coinModal.grantVerification,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Tanga miqdorini o\'zgartirib bo\'lmadi');
+      setActionMessage(data.message || `Foydalanuvchi #${identifier} balansi muvaffaqiyatli yangilandi! 🪙`);
+      setCoinModal((prev) => ({ ...prev, isOpen: false }));
+      fetchUsersList();
+    } catch (err: any) {
+      alert('Xatolik: ' + err.message);
+    } finally {
+      setIsAdjustingCoins(false);
+      setTimeout(() => setActionMessage(null), 4000);
+    }
+  };
+
+  const handleToggleUserVerified = async (u: UserProfile) => {
+    try {
+      const nextStatus = !Boolean(u.is_verified || u.has_purchased_coins);
+      const identifier = u.short_id || u.username;
+      const res = await fetch('/api/admin/users/toggle-verified', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: identifier,
+          is_verified: nextStatus,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Tasdiqlash holatini o\'zgartirib bo\'lmadi');
+      setActionMessage(`Foydalanuvchi #${identifier} tasdiqlangan VIP holati: ${nextStatus ? 'Berildi ✅' : 'Bekor qilindi ❌'}`);
+      fetchUsersList();
+    } catch (err: any) {
+      alert('Xatolik: ' + err.message);
+    } finally {
+      setTimeout(() => setActionMessage(null), 4000);
+    }
+  };
+
+  const handleQuickLookup = async () => {
+    if (!quickLookupId.trim()) return;
+    const cleanId = quickLookupId.trim().replace('#', '');
+    try {
+      const res = await fetch(`/api/admin/users/lookup?id=${encodeURIComponent(cleanId)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || `Foydalanuvchi #${cleanId} topilmadi`);
+        return;
+      }
+      handleOpenCoinModal(data);
+      setQuickLookupId('');
+    } catch (err: any) {
+      alert('Xatolik: ' + err.message);
+    }
+  };
 
   // Filtered chapters for the Chapters tab
   const filteredChapters = chaptersList.filter((ch) => {
@@ -759,6 +881,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           >
             <Layers className="w-4 h-4" />
             <span>Boblar boshqaruvi</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('users');
+              fetchUsersList();
+            }}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'users'
+                ? 'bg-amber-400 text-black shadow-lg shadow-amber-500/20'
+                : 'bg-[#0a0a1a] text-[#a0a0b8] hover:text-white border border-[#1e1e3a]'
+            }`}
+            id="tab-admin-users"
+          >
+            <Coins className="w-4 h-4 text-amber-500" />
+            <span>Foydalanuvchilar & Tangalar (4 xonali ID)</span>
+            <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-300 text-[10px] font-mono">
+              {usersList.length}
+            </span>
           </button>
 
           <button
@@ -1442,7 +1583,402 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
         )}
 
+        {/* Tab 4: Users & Coins (4-digit ID) Management */}
+        {activeTab === 'users' && (
+          <div className="space-y-6">
+            {/* Top Toolbar: Search & Quick 4-Digit ID Lookup */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-[#0a0a1a] border border-[#1e1e3a] flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
+              <div className="flex-1 w-full max-w-md relative">
+                <Search className="w-4 h-4 text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="ID raqam (#1001), @username yoki ism bo'yicha qidirish..."
+                  value={userSearchQuery}
+                  onChange={(e) => setUserSearchQuery(e.target.value)}
+                  className="w-full bg-[#020d07] border border-[#1e1e3a] rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder:text-white/40 focus:border-amber-400 outline-none transition"
+                />
+              </div>
+
+              {/* Quick 4-Digit ID Action */}
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <div className="relative flex-1 sm:w-48">
+                  <input
+                    type="text"
+                    placeholder="4 xonali ID (masalan: 1001)"
+                    value={quickLookupId}
+                    onChange={(e) => setQuickLookupId(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleQuickLookup();
+                    }}
+                    className="w-full bg-[#020d07] border border-amber-500/30 rounded-xl px-3 py-2 text-xs font-mono text-amber-300 placeholder:text-amber-500/40 focus:border-amber-400 outline-none"
+                  />
+                </div>
+                <button
+                  onClick={handleQuickLookup}
+                  className="btn-ios btn-ios-sm py-2 px-3.5 bg-gradient-to-r from-amber-500 to-amber-600 text-black font-bold text-xs flex items-center gap-1.5 shadow-md hover:scale-105 transition cursor-pointer"
+                >
+                  <Coins className="w-3.5 h-3.5" />
+                  <span>ID bo'yicha tanga berish</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Users Table */}
+            <div className="bg-[#0a0a1a] border border-[#1e1e3a] rounded-2xl overflow-hidden shadow-xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-[#1e1e3a] bg-[#14121a] text-[#a0a0b8] uppercase font-bold text-[10px] tracking-wider">
+                      <th className="p-3.5">4 Xonali ID</th>
+                      <th className="p-3.5">Foydalanuvchi</th>
+                      <th className="p-3.5">Balans (Tangalar)</th>
+                      <th className="p-3.5">VIP Tasdiqlangan</th>
+                      <th className="p-3.5">Xarid Tarixi</th>
+                      <th className="p-3.5">A'zo bo'lgan</th>
+                      <th className="p-3.5 text-right">Tezkor Amallar</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#1e1e3a]/60">
+                    {isLoadingUsers ? (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-white/50">
+                          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-amber-400" />
+                          <span>Foydalanuvchilar yuklanmoqda...</span>
+                        </td>
+                      </tr>
+                    ) : usersList.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-white/50">
+                          <span>Hozircha foydalanuvchilar topilmadi</span>
+                        </td>
+                      </tr>
+                    ) : (
+                      usersList
+                        .filter((u) => {
+                          if (!userSearchQuery.trim()) return true;
+                          const q = userSearchQuery.toLowerCase().replace('#', '');
+                          const idMatch = String(u.short_id || '').includes(q);
+                          const userMatch = (u.username || '').toLowerCase().includes(q);
+                          const nameMatch = (u.name || '').toLowerCase().includes(q);
+                          return idMatch || userMatch || nameMatch;
+                        })
+                        .map((u) => {
+                          const isVerified = Boolean(u.is_verified || u.has_purchased_coins || u.isAdmin);
+                          return (
+                            <tr key={u.username} className="hover:bg-white/[0.02] transition">
+                              {/* 4-digit ID Column */}
+                              <td className="p-3.5">
+                                <div
+                                  onClick={() => {
+                                    if (u.short_id) {
+                                      navigator.clipboard.writeText(String(u.short_id));
+                                      setCopiedUserId(u.short_id);
+                                      setTimeout(() => setCopiedUserId(null), 2000);
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 hover:text-white hover:border-emerald-400 transition cursor-pointer font-mono font-bold text-xs"
+                                  title="Nusxalash uchun bosing"
+                                >
+                                  <span>#{u.short_id || 1000}</span>
+                                  {copiedUserId === u.short_id ? (
+                                    <Check className="w-3 h-3 text-[#00DC82]" />
+                                  ) : (
+                                    <Copy className="w-3 h-3 text-emerald-400/60" />
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* User Info Column */}
+                              <td className="p-3.5">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-8 h-8 rounded-xl overflow-hidden bg-gradient-to-tr from-amber-500/30 to-emerald-500/30 p-0.5 shrink-0">
+                                    {u.avatar_url ? (
+                                      <img
+                                        src={u.avatar_url}
+                                        alt={u.username}
+                                        className="w-full h-full rounded-[10px] object-cover"
+                                      />
+                                    ) : (
+                                      <div className="w-full h-full rounded-[10px] bg-[#0a0a1a] flex items-center justify-center font-black text-amber-300 text-xs">
+                                        {(u.name || u.username)[0]?.toUpperCase()}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="font-bold text-white text-xs">
+                                        {u.name || u.username}
+                                      </span>
+                                      {isVerified && <VerifiedBadge size="sm" />}
+                                      {u.isAdmin && (
+                                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-[#6c5ce7]/20 text-[#a29bfe] border border-[#6c5ce7]/40">
+                                          ADMIN
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-[11px] text-[#a0a0b8] font-mono">
+                                      @{u.username}
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Coins Balance */}
+                              <td className="p-3.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-sm">🪙</span>
+                                  <span className="font-mono font-bold text-amber-300 text-sm">
+                                    {(u.coins ?? 0).toLocaleString()}
+                                  </span>
+                                  <span className="text-[10px] text-amber-500/70">tanga</span>
+                                </div>
+                              </td>
+
+                              {/* VIP Verified Badge Column */}
+                              <td className="p-3.5">
+                                <button
+                                  onClick={() => handleToggleUserVerified(u)}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-bold border transition cursor-pointer ${
+                                    isVerified
+                                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
+                                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:bg-zinc-800'
+                                  }`}
+                                  title="Galochka holatini o'zgartirish"
+                                >
+                                  {isVerified ? (
+                                    <>
+                                      <VerifiedBadge size="sm" />
+                                      <span>Tasdiqlangan VIP</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="w-2 h-2 rounded-full bg-zinc-600" />
+                                      <span>Oddiy</span>
+                                    </>
+                                  )}
+                                </button>
+                              </td>
+
+                              {/* Purchase History */}
+                              <td className="p-3.5">
+                                {u.has_purchased_coins ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-semibold bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                    <span>Tanga sotib olgan</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-white/40">
+                                    Xarid qilmagan
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Created At */}
+                              <td className="p-3.5 text-[#a0a0b8] font-mono text-[11px]">
+                                {u.created_at || '2026-01-01'}
+                              </td>
+
+                              {/* Quick Actions */}
+                              <td className="p-3.5 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => handleOpenCoinModal(u)}
+                                    className="btn-ios btn-ios-sm py-1 px-2.5 text-xs font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/30 flex items-center gap-1 cursor-pointer"
+                                    title="Tanga qo'shish yoki ayirish"
+                                  >
+                                    <Coins className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>Tanga berish / olish</span>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
       </main>
+
+      {/* Modal: Coin Adjust Modal (Add / Deduct / Set Coins & VIP Verification) */}
+      {coinModal.isOpen && coinModal.user && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
+          <div className="w-full max-w-lg bg-[#0e1218]/95 border border-amber-500/30 rounded-3xl shadow-[0_20px_60px_rgba(0,0,0,0.8)] p-5 sm:p-7 my-auto text-left relative">
+            
+            <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300">
+                  <Coins className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    <span>Tanga Boshqaruvi</span>
+                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      ID: #{coinModal.user.short_id || 1000}
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-[#a0a0b8]">
+                    Foydalanuvchi: <span className="text-white font-bold">{coinModal.user.name || coinModal.user.username}</span> (@{coinModal.user.username})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCoinModal((prev) => ({ ...prev, isOpen: false }))}
+                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/70 hover:text-white flex items-center justify-center transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Current Balance Display */}
+            <div className="p-3.5 rounded-2xl bg-[#14121a] border border-amber-500/30 flex items-center justify-between mb-4 shadow-inner">
+              <span className="text-xs font-semibold text-white/70">Hozirgi Balans:</span>
+              <div className="flex items-center gap-1.5 font-mono font-black text-amber-300 text-base">
+                <span>🪙</span>
+                <span>{(coinModal.user.coins ?? 0).toLocaleString()} tanga</span>
+              </div>
+            </div>
+
+            {/* Action Type Selector */}
+            <div className="space-y-3 mb-4">
+              <label className="text-xs font-bold text-white block">Amal turini tanlang:</label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCoinModal((prev) => ({ ...prev, action: 'add' }))}
+                  className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center gap-1 transition ${
+                    coinModal.action === 'add'
+                      ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                      : 'bg-black/30 border-white/10 text-white/60 hover:text-white'
+                  }`}
+                >
+                  <Plus className="w-4 h-4 text-emerald-400" />
+                  <span>Qo'shish (+)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCoinModal((prev) => ({ ...prev, action: 'deduct' }))}
+                  className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center gap-1 transition ${
+                    coinModal.action === 'deduct'
+                      ? 'bg-rose-500/20 border-rose-400 text-rose-300'
+                      : 'bg-black/30 border-white/10 text-white/60 hover:text-white'
+                  }`}
+                >
+                  <Trash2 className="w-4 h-4 text-rose-400" />
+                  <span>Ayirish (-)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCoinModal((prev) => ({ ...prev, action: 'set' }))}
+                  className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center gap-1 transition ${
+                    coinModal.action === 'set'
+                      ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                      : 'bg-black/30 border-white/10 text-white/60 hover:text-white'
+                  }`}
+                >
+                  <Edit className="w-4 h-4 text-amber-400" />
+                  <span>Belgilash (=)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Amount input & Quick Chips */}
+            <div className="space-y-2 mb-4">
+              <label className="text-xs font-bold text-white block">Tanga miqdori:</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  value={coinModal.amount}
+                  onChange={(e) =>
+                    setCoinModal((prev) => ({
+                      ...prev,
+                      amount: Math.max(0, parseInt(e.target.value, 10) || 0),
+                    }))
+                  }
+                  className="w-full bg-[#020d07] border border-amber-500/40 rounded-xl px-4 py-2.5 text-base font-mono font-bold text-amber-300 focus:border-amber-400 outline-none"
+                  placeholder="Masalan: 100"
+                />
+              </div>
+
+              {/* Quick preset buttons */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {[50, 100, 250, 500, 1000, 5000].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setCoinModal((prev) => ({ ...prev, amount: preset }))}
+                    className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/15 text-zinc-300 text-xs font-mono transition"
+                  >
+                    +{preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* VIP Verification checkbox */}
+            <div className="p-3 rounded-xl bg-black/40 border border-white/10 mb-6 flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="grant-verification-chk"
+                checked={coinModal.grantVerification}
+                onChange={(e) =>
+                  setCoinModal((prev) => ({
+                    ...prev,
+                    grantVerification: e.target.checked,
+                  }))
+                }
+                className="mt-0.5 rounded accent-amber-400 w-4 h-4 cursor-pointer"
+              />
+              <label htmlFor="grant-verification-chk" className="text-xs text-white/90 cursor-pointer select-none">
+                <span className="font-bold flex items-center gap-1.5 text-emerald-300">
+                  <VerifiedBadge size="sm" />
+                  VIP Tasdiqlangan (Galochka) berilsin
+                </span>
+                <span className="text-[11px] text-white/50 block mt-0.5">
+                  Foydalanuvchi profilida ko'k galochka belgisi aks etadi.
+                </span>
+              </label>
+            </div>
+
+            {/* Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setCoinModal((prev) => ({ ...prev, isOpen: false }))}
+                className="btn-ios text-xs py-2 px-4"
+              >
+                Bekor qilish
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteCoinAdjust}
+                disabled={isAdjustingCoins}
+                className="btn-ios btn-ios-solid py-2 px-5 text-xs font-bold bg-gradient-to-r from-amber-400 to-amber-500 text-black shadow-lg shadow-amber-500/20 flex items-center gap-2 cursor-pointer"
+              >
+                {isAdjustingCoins ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saqlanmoqda...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Tasdiqlash & Saqlash</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* Modal: Add / Edit Manga */}
       {showMangaModal && (

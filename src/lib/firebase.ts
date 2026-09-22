@@ -1,5 +1,14 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signInWithRedirect, 
+  getRedirectResult, 
+  signOut as firebaseSignOut, 
+  onAuthStateChanged, 
+  User as FirebaseUser 
+} from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import type { UserProfile } from '../types.js';
@@ -84,52 +93,91 @@ export async function testFirestoreConnection() {
 testFirestoreConnection();
 
 /**
- * Sign in with Google Popup
+ * Helper to process a signed in Firebase Google User and sync to Firestore
+ */
+export async function processGoogleUser(user: FirebaseUser): Promise<{
+  firebaseUser: FirebaseUser;
+  profile: Partial<UserProfile>;
+}> {
+  const email = user.email || '';
+  const username = user.displayName?.replace(/\s+/g, '_').toLowerCase() || email.split('@')[0] || `user_${user.uid.slice(0, 6)}`;
+  const isAdmin = email.toLowerCase() === 'user321admin@gmail.com' || email.toLowerCase().includes('admin');
+
+  const profileData: Partial<UserProfile> = {
+    username,
+    name: user.displayName || username,
+    avatar_url: user.photoURL || 'https://files.catbox.moe/g244x0.jpg',
+    isAdmin,
+  };
+
+  // Sync to Firestore
+  try {
+    const userDocRef = doc(db, 'users', user.uid);
+    await setDoc(userDocRef, {
+      userId: user.uid,
+      username: profileData.username,
+      name: profileData.name,
+      email: user.email,
+      avatar_url: profileData.avatar_url,
+      auth_provider: 'google',
+      isAdmin,
+      last_login: new Date().toISOString()
+    }, { merge: true });
+  } catch (dbErr) {
+    console.warn('Firestore user doc sync error:', dbErr);
+  }
+
+  return { firebaseUser: user, profile: profileData };
+}
+
+/**
+ * Sign in with Google Full-Screen Redirect (user requested full-screen instead of popup)
+ */
+export async function signInWithGoogleRedirect(): Promise<void> {
+  await signInWithRedirect(auth, googleProvider);
+}
+
+/**
+ * Check and process redirect result after Google full-screen redirect
+ */
+export async function checkGoogleRedirectResult(): Promise<{
+  firebaseUser: FirebaseUser;
+  profile: Partial<UserProfile>;
+} | null> {
+  try {
+    const result = await getRedirectResult(auth);
+    if (!result || !result.user) {
+      return null;
+    }
+    return await processGoogleUser(result.user);
+  } catch (err: any) {
+    console.warn('Google Redirect Result Check:', err);
+    return null;
+  }
+}
+
+/**
+ * Sign in with Google (full-screen redirect first, fallback to popup if in restricted environment)
  */
 export async function signInWithGoogle(): Promise<{
   firebaseUser: FirebaseUser;
   profile: Partial<UserProfile>;
-}> {
+} | void> {
   try {
-    const result = await signInWithPopup(auth, googleProvider);
-    const user = result.user;
-
-    const email = user.email || '';
-    const username = user.displayName?.replace(/\s+/g, '_').toLowerCase() || email.split('@')[0] || `user_${user.uid.slice(0, 6)}`;
-    const isAdmin = email.toLowerCase() === 'user321admin@gmail.com' || email.toLowerCase().includes('admin');
-
-    const profileData: Partial<UserProfile> = {
-      username,
-      name: user.displayName || username,
-      avatar_url: user.photoURL || 'https://files.catbox.moe/g244x0.jpg',
-      isAdmin,
-    };
-
-    // Sync to Firestore
+    // Perform full-screen redirect
+    await signInWithRedirect(auth, googleProvider);
+  } catch (redirectErr: any) {
+    console.warn('Redirect failed or restricted, attempting popup fallback:', redirectErr);
     try {
-      const userDocRef = doc(db, 'users', user.uid);
-      await setDoc(userDocRef, {
-        userId: user.uid,
-        username: profileData.username,
-        name: profileData.name,
-        email: user.email,
-        avatar_url: profileData.avatar_url,
-        auth_provider: 'google',
-        isAdmin,
-        last_login: new Date().toISOString()
-      }, { merge: true });
-    } catch (dbErr) {
-      console.warn('Firestore user doc sync error:', dbErr);
+      const result = await signInWithPopup(auth, googleProvider);
+      return await processGoogleUser(result.user);
+    } catch (popupErr: any) {
+      if (popupErr?.code === 'auth/popup-closed-by-user' || popupErr?.code === 'auth/cancelled-popup-request') {
+        throw popupErr;
+      }
+      console.error('Google Sign-In Error:', popupErr);
+      throw popupErr;
     }
-
-    return { firebaseUser: user, profile: profileData };
-  } catch (err: any) {
-    if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
-      // User closed or cancelled popup window intentionally
-      throw err;
-    }
-    console.error('Google Sign-In Error:', err);
-    throw err;
   }
 }
 

@@ -74,7 +74,10 @@ let memoryUserProfiles: Record<string, UserProfile> = loadJsonFile<Record<string
     name: 'Bosh Administrator',
     avatar_url: 'https://files.catbox.moe/g244x0.jpg',
     bio: 'AniManga Uz platformasi asoschisi va bosh muharriri.',
+    short_id: 1000,
     isAdmin: true,
+    is_verified: true,
+    has_purchased_coins: true,
     coins: 500,
     unlocked_chapters: [],
     created_at: new Date().toISOString().split('T')[0],
@@ -211,6 +214,10 @@ export async function initDatabase() {
 
     await client.query(`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS coins INT DEFAULT 0;`);
     await client.query(`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS unlocked_chapters JSONB DEFAULT '[]'::jsonb;`);
+    await client.query(`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS short_id INT;`);
+    await client.query(`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;`);
+    await client.query(`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS has_purchased_coins BOOLEAN DEFAULT FALSE;`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_user_profiles_short_id ON user_profiles (short_id);`);
 
     // 5. Create coin_transactions table
     await client.query(`
@@ -959,13 +966,29 @@ export async function getAllGenres(): Promise<Genre[]> {
   }
 }
 
+export function generateShortIdForUser(username: string): number {
+  if (username.toLowerCase() === 'admin') return 1000;
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = ((hash << 5) - hash) + username.charCodeAt(i);
+    hash |= 0;
+  }
+  // Generates 4-digit ID between 1001 and 9999
+  const base = 1001 + (Math.abs(hash) % 8990);
+  return base;
+}
+
 export async function getUserProfile(username: string): Promise<UserProfile> {
+  const shortId = generateShortIdForUser(username);
   const defaultProfile: UserProfile = {
     username,
     name: username === 'admin' ? 'Bosh Administrator' : username,
     avatar_url: username === 'admin' ? 'https://files.catbox.moe/g244x0.jpg' : '',
     bio: username === 'admin' ? 'AniManga Uz platformasi bosh administratori.' : 'AniManga Uz faol foydalanuvchisi',
+    short_id: shortId,
     isAdmin: username === 'admin',
+    is_verified: username === 'admin',
+    has_purchased_coins: username === 'admin',
     coins: username === 'admin' ? 500 : 0,
     unlocked_chapters: [],
     created_at: new Date().toISOString().split('T')[0],
@@ -982,12 +1005,21 @@ export async function getUserProfile(username: string): Promise<UserProfile> {
       client.release();
       if (res.rows.length > 0) {
         const row = res.rows[0];
+        const assignedShortId = Number(row.short_id) || shortId;
+        const isAdmin = Boolean(row.is_admin);
+        const hasPurchased = Boolean(row.has_purchased_coins);
+        // Galochka / verified badge is true if user has purchased coins at least once, or is admin, or is explicitly verified
+        const isVerified = Boolean(row.is_verified || isAdmin || hasPurchased);
+
         return {
           username: row.username,
           name: row.name || row.username,
           avatar_url: row.avatar_url || '',
           bio: row.bio || '',
-          isAdmin: Boolean(row.is_admin),
+          short_id: assignedShortId,
+          isAdmin,
+          is_verified: isVerified,
+          has_purchased_coins: hasPurchased,
           coins: Number(row.coins ?? 0),
           unlocked_chapters: Array.isArray(row.unlocked_chapters) ? row.unlocked_chapters : [],
           created_at: row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : defaultProfile.created_at,
@@ -1004,7 +1036,10 @@ export async function getUserProfile(username: string): Promise<UserProfile> {
 
   const found = memoryUserProfiles[username.toLowerCase()] || memoryUserProfiles[username];
   if (found) {
+    if (!found.short_id) found.short_id = shortId;
     if (found.coins === undefined) found.coins = found.isAdmin ? 500 : 0;
+    if (found.is_verified === undefined) found.is_verified = Boolean(found.isAdmin || found.has_purchased_coins);
+    if (found.has_purchased_coins === undefined) found.has_purchased_coins = Boolean(found.isAdmin);
     if (!found.unlocked_chapters) found.unlocked_chapters = [];
     return found;
   }
@@ -1016,10 +1051,21 @@ export async function getUserProfile(username: string): Promise<UserProfile> {
 
 export async function saveUserProfile(profile: Partial<UserProfile> & { username: string }): Promise<UserProfile> {
   const current = await getUserProfile(profile.username);
+  const updatedShortId = profile.short_id ? Number(profile.short_id) : (current.short_id || generateShortIdForUser(profile.username));
+  const updatedIsAdmin = profile.isAdmin !== undefined ? Boolean(profile.isAdmin) : Boolean(current.isAdmin);
+  const updatedHasPurchased = profile.has_purchased_coins !== undefined ? Boolean(profile.has_purchased_coins) : Boolean(current.has_purchased_coins);
+  const updatedIsVerified = profile.is_verified !== undefined 
+    ? Boolean(profile.is_verified) 
+    : Boolean(current.is_verified || updatedIsAdmin || updatedHasPurchased);
+
   const updated: UserProfile = {
     ...current,
     ...profile,
     username: current.username, // username cannot be wiped
+    short_id: updatedShortId,
+    isAdmin: updatedIsAdmin,
+    is_verified: updatedIsVerified,
+    has_purchased_coins: updatedHasPurchased,
     coins: profile.coins !== undefined ? Number(profile.coins) : (current.coins ?? 0),
     unlocked_chapters: profile.unlocked_chapters !== undefined ? profile.unlocked_chapters : (current.unlocked_chapters || []),
   };
@@ -1028,8 +1074,8 @@ export async function saveUserProfile(profile: Partial<UserProfile> & { username
     try {
       const client = await pool.connect();
       await client.query(`
-        INSERT INTO user_profiles (username, name, avatar_url, bio, is_admin, coins, unlocked_chapters, comments, liked_mangas, views_history, bookmarks, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
+        INSERT INTO user_profiles (username, name, avatar_url, bio, is_admin, coins, unlocked_chapters, comments, liked_mangas, views_history, bookmarks, short_id, is_verified, has_purchased_coins, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
         ON CONFLICT (username) DO UPDATE SET
           name = EXCLUDED.name,
           avatar_url = EXCLUDED.avatar_url,
@@ -1041,6 +1087,9 @@ export async function saveUserProfile(profile: Partial<UserProfile> & { username
           liked_mangas = EXCLUDED.liked_mangas,
           views_history = EXCLUDED.views_history,
           bookmarks = EXCLUDED.bookmarks,
+          short_id = EXCLUDED.short_id,
+          is_verified = EXCLUDED.is_verified,
+          has_purchased_coins = EXCLUDED.has_purchased_coins,
           updated_at = CURRENT_TIMESTAMP
       `, [
         updated.username,
@@ -1054,6 +1103,9 @@ export async function saveUserProfile(profile: Partial<UserProfile> & { username
         JSON.stringify(updated.liked_mangas || []),
         JSON.stringify(updated.views_history || []),
         JSON.stringify(updated.bookmarks || []),
+        updated.short_id,
+        Boolean(updated.is_verified),
+        Boolean(updated.has_purchased_coins),
       ]);
       client.release();
     } catch (err) {
@@ -1062,7 +1114,192 @@ export async function saveUserProfile(profile: Partial<UserProfile> & { username
   }
 
   memoryUserProfiles[updated.username.toLowerCase()] = updated;
+  persistAllToFiles();
   return updated;
+}
+
+// Admin function: Get all registered user profiles
+export async function getAllUserProfiles(): Promise<UserProfile[]> {
+  if (isPgConnected) {
+    try {
+      const client = await pool.connect();
+      const res = await client.query('SELECT * FROM user_profiles ORDER BY is_admin DESC, updated_at DESC LIMIT 200');
+      client.release();
+      if (res.rows.length > 0) {
+        return res.rows.map(row => {
+          const shortId = Number(row.short_id) || generateShortIdForUser(row.username);
+          const isAdmin = Boolean(row.is_admin);
+          const hasPurchased = Boolean(row.has_purchased_coins);
+          const isVerified = Boolean(row.is_verified || isAdmin || hasPurchased);
+          return {
+            username: row.username,
+            name: row.name || row.username,
+            avatar_url: row.avatar_url || '',
+            bio: row.bio || '',
+            short_id: shortId,
+            isAdmin,
+            is_verified: isVerified,
+            has_purchased_coins: hasPurchased,
+            coins: Number(row.coins ?? 0),
+            unlocked_chapters: Array.isArray(row.unlocked_chapters) ? row.unlocked_chapters : [],
+            created_at: row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+            comments: Array.isArray(row.comments) ? row.comments : [],
+            liked_mangas: Array.isArray(row.liked_mangas) ? row.liked_mangas : [],
+            views_history: Array.isArray(row.views_history) ? row.views_history : [],
+            bookmarks: Array.isArray(row.bookmarks) ? row.bookmarks : [],
+          };
+        });
+      }
+    } catch (err) {
+      console.error('[PostgreSQL getAllUserProfiles error]', err);
+    }
+  }
+
+  return Object.values(memoryUserProfiles).map(p => ({
+    ...p,
+    short_id: p.short_id || generateShortIdForUser(p.username),
+    is_verified: Boolean(p.is_verified || p.isAdmin || p.has_purchased_coins),
+    has_purchased_coins: Boolean(p.has_purchased_coins),
+  }));
+}
+
+// Find user by 4-digit short_id (e.g. 1001, "#1001") or username
+export async function getUserProfileByIdentifier(identifier: string | number): Promise<UserProfile | null> {
+  const cleanStr = String(identifier).trim().replace(/^#/, '');
+  const numId = parseInt(cleanStr, 10);
+  const isNumeric = !isNaN(numId) && numId >= 1000 && numId <= 99999;
+
+  if (isPgConnected) {
+    try {
+      const client = await pool.connect();
+      let res;
+      if (isNumeric) {
+        res = await client.query(
+          'SELECT * FROM user_profiles WHERE short_id = $1 OR LOWER(username) = LOWER($2)',
+          [numId, cleanStr]
+        );
+      } else {
+        res = await client.query(
+          'SELECT * FROM user_profiles WHERE LOWER(username) = LOWER($1)',
+          [cleanStr]
+        );
+      }
+      client.release();
+      if (res.rows.length > 0) {
+        const row = res.rows[0];
+        const shortId = Number(row.short_id) || generateShortIdForUser(row.username);
+        const isAdmin = Boolean(row.is_admin);
+        const hasPurchased = Boolean(row.has_purchased_coins);
+        return {
+          username: row.username,
+          name: row.name || row.username,
+          avatar_url: row.avatar_url || '',
+          bio: row.bio || '',
+          short_id: shortId,
+          isAdmin,
+          is_verified: Boolean(row.is_verified || isAdmin || hasPurchased),
+          has_purchased_coins: hasPurchased,
+          coins: Number(row.coins ?? 0),
+          unlocked_chapters: Array.isArray(row.unlocked_chapters) ? row.unlocked_chapters : [],
+          created_at: row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          comments: Array.isArray(row.comments) ? row.comments : [],
+          liked_mangas: Array.isArray(row.liked_mangas) ? row.liked_mangas : [],
+          views_history: Array.isArray(row.views_history) ? row.views_history : [],
+          bookmarks: Array.isArray(row.bookmarks) ? row.bookmarks : [],
+        };
+      }
+    } catch (err) {
+      console.error('[PostgreSQL getUserProfileByIdentifier error]', err);
+    }
+  }
+
+  // Memory fallback
+  const profiles = Object.values(memoryUserProfiles);
+  const found = profiles.find(p => {
+    if (isNumeric && (p.short_id === numId || generateShortIdForUser(p.username) === numId)) return true;
+    return p.username.toLowerCase() === cleanStr.toLowerCase();
+  });
+
+  if (found) {
+    return {
+      ...found,
+      short_id: found.short_id || generateShortIdForUser(found.username),
+      is_verified: Boolean(found.is_verified || found.isAdmin || found.has_purchased_coins),
+      has_purchased_coins: Boolean(found.has_purchased_coins),
+    };
+  }
+
+  // If not found and input was a username, load or create
+  if (!isNumeric && cleanStr.length > 0) {
+    return await getUserProfile(cleanStr);
+  }
+
+  return null;
+}
+
+// Admin: Adjust coins by 4-digit ID or username
+export async function adjustUserCoins(
+  identifier: string | number,
+  amount: number,
+  action: 'add' | 'deduct' | 'set' = 'add',
+  grantVerification: boolean = false
+): Promise<{ success: boolean; profile: UserProfile; message: string }> {
+  const profile = await getUserProfileByIdentifier(identifier);
+  if (!profile) {
+    throw new Error(`Foydalanuvchi #${identifier} topilmadi! Iltimos, 4 xonali ID yoki username to'g'riligini tekshiring.`);
+  }
+
+  const currentCoins = Number(profile.coins || 0);
+  const changeAmount = Math.max(0, Math.floor(amount || 0));
+  let newCoins = currentCoins;
+
+  if (action === 'add') {
+    newCoins = currentCoins + changeAmount;
+  } else if (action === 'deduct') {
+    newCoins = Math.max(0, currentCoins - changeAmount);
+  } else if (action === 'set') {
+    newCoins = changeAmount;
+  }
+
+  const hasPurchased = grantVerification ? true : Boolean(profile.has_purchased_coins || (action === 'add' && changeAmount > 0));
+  const isVerified = grantVerification ? true : Boolean(profile.is_verified || profile.isAdmin || hasPurchased);
+
+  const updated = await saveUserProfile({
+    username: profile.username,
+    coins: newCoins,
+    has_purchased_coins: hasPurchased,
+    is_verified: isVerified,
+  });
+
+  let message = '';
+  if (action === 'add') {
+    message = `Foydalanuvchi @${updated.username} (ID: #${updated.short_id}) hisobiga ${changeAmount} ta tanga muvaffaqiyatli qo'shildi! Yangi balans: ${newCoins} tanga.`;
+  } else if (action === 'deduct') {
+    message = `Foydalanuvchi @${updated.username} (ID: #${updated.short_id}) hisobidan ${changeAmount} ta tanga qaytarib olindi (ayirildi). Yangi balans: ${newCoins} tanga.`;
+  } else {
+    message = `Foydalanuvchi @${updated.username} (ID: #${updated.short_id}) balansi ${newCoins} tanga qilib belgilandi.`;
+  }
+
+  return { success: true, profile: updated, message };
+}
+
+// Admin: Toggle user verification badge
+export async function toggleUserVerified(
+  identifier: string | number,
+  is_verified: boolean
+): Promise<{ success: boolean; profile: UserProfile }> {
+  const profile = await getUserProfileByIdentifier(identifier);
+  if (!profile) {
+    throw new Error(`Foydalanuvchi #${identifier} topilmadi!`);
+  }
+
+  const updated = await saveUserProfile({
+    username: profile.username,
+    is_verified: is_verified,
+    has_purchased_coins: is_verified ? true : false,
+  });
+
+  return { success: true, profile: updated };
 }
 
 export async function purchaseChapter(chapterId: number, username: string): Promise<{ success: boolean; message: string; remaining_coins?: number; already_unlocked?: boolean }> {
@@ -1236,12 +1473,14 @@ export async function markCoinTransactionPaid(order_id: number): Promise<{ succe
     }
   }
 
-  // Credit coins to user
+  // Credit coins to user and grant VIP Verified Badge
   const profile = await getUserProfile(tx.username);
   const updatedCoins = (profile.coins || 0) + tx.coins;
   await saveUserProfile({
     username: tx.username,
     coins: updatedCoins,
+    has_purchased_coins: true,
+    is_verified: true,
   });
 
   return {

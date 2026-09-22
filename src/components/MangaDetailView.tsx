@@ -971,7 +971,9 @@ export const MangaDetailView: React.FC<MangaDetailViewProps> = ({
                       <div className="flex items-center justify-between gap-2 mt-3 flex-wrap">
                         <span className="text-[11px] text-[#a0a0b8] inline-flex items-center gap-1">
                           <span className="truncate max-w-[140px] sm:max-w-none">{userProfile?.name || user.username}</span>
-                          <VerifiedBadge size="sm" />
+                          {(userProfile?.is_verified || userProfile?.has_purchased_coins || userProfile?.isAdmin || user?.isAdmin) && (
+                            <VerifiedBadge size="sm" />
+                          )}
                         </span>
                         <button
                           type="submit"
@@ -1036,7 +1038,9 @@ export const MangaDetailView: React.FC<MangaDetailViewProps> = ({
                                   <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                                     <p className="text-xs sm:text-sm font-bold text-white flex items-center gap-1 truncate">
                                       <span>{c.username}</span>
-                                      <VerifiedBadge size="sm" />
+                                      {Boolean((c as any).is_verified || (c as any).isVerified || (isAuthor && (userProfile?.is_verified || userProfile?.has_purchased_coins || userProfile?.isAdmin))) && (
+                                        <VerifiedBadge size="sm" />
+                                      )}
                                     </p>
                                     {isAuthor && (
                                       <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-[#00DC82]/20 text-[#00DC82] border border-[#00DC82]/30">

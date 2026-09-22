@@ -34,6 +34,10 @@ import {
   getAllGenres,
   getUserProfile,
   saveUserProfile,
+  getAllUserProfiles,
+  getUserProfileByIdentifier,
+  adjustUserCoins,
+  toggleUserVerified,
   createCoinTransaction,
   getCoinTransaction,
   markCoinTransactionPaid,
@@ -630,6 +634,63 @@ async function startServer() {
       res.json(saved);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Admin User & Coin Management Routes
+  app.get('/api/admin/users', async (req, res) => {
+    try {
+      const users = await getAllUserProfiles();
+      res.json(users);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/admin/users/lookup', async (req, res) => {
+    try {
+      const id = req.query.id as string;
+      if (!id) {
+        return res.status(400).json({ error: 'ID yoki username talab qilinadi' });
+      }
+      const user = await getUserProfileByIdentifier(id);
+      if (!user) {
+        return res.status(404).json({ error: `Foydalanuvchi #${id} topilmadi` });
+      }
+      res.json(user);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/admin/users/adjust-coins', async (req, res) => {
+    try {
+      const { identifier, amount, action, grantVerification } = req.body;
+      if (!identifier && identifier !== 0) {
+        return res.status(400).json({ error: 'Foydalanuvchi 4 xonali IDsi yoki username ko\'rsatilishi shart' });
+      }
+      const numAmount = parseInt(amount, 10);
+      if (isNaN(numAmount) || numAmount < 0) {
+        return res.status(400).json({ error: 'Tanga miqdori to\'g\'ri butun son bo\'lishi shart' });
+      }
+      const act = action === 'deduct' || action === 'set' ? action : 'add';
+      const result = await adjustUserCoins(identifier, numAmount, act, Boolean(grantVerification));
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Tangani o\'zgartirishda xatolik yuz berdi' });
+    }
+  });
+
+  app.post('/api/admin/users/toggle-verified', async (req, res) => {
+    try {
+      const { identifier, is_verified } = req.body;
+      if (!identifier && identifier !== 0) {
+        return res.status(400).json({ error: 'Foydalanuvchi 4 xonali IDsi yoki username ko\'rsatilishi shart' });
+      }
+      const result = await toggleUserVerified(identifier, Boolean(is_verified));
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Tasdiqlash holatini o\'zgartirishda xatolik' });
     }
   });
 

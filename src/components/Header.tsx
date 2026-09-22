@@ -201,13 +201,20 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-bold text-white truncate max-w-[170px]">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-sm font-bold text-white truncate max-w-[150px]">
                     {profile?.name || user.username}
                   </span>
-                  <VerifiedBadge size="sm" />
+                  {(profile?.is_verified || profile?.has_purchased_coins || profile?.isAdmin || user.isAdmin) && (
+                    <VerifiedBadge size="sm" />
+                  )}
                 </div>
-                <p className="text-xs text-white/50 truncate font-mono mt-0.5">@{user.username}</p>
+                <div className="flex items-center gap-1.5 text-xs text-white/50 font-mono mt-0.5">
+                  <span className="truncate">@{user.username}</span>
+                  <span className="text-emerald-400 font-bold bg-emerald-950/60 px-1.5 py-0.2 rounded border border-emerald-500/30 text-[10px]">
+                    #{profile?.short_id || 1000}
+                  </span>
+                </div>
               </div>
             </div>
 

@@ -106,21 +106,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }
 
   if (!isOpen) return null;
 
-  // Google Login
+  // Google Login (Full-screen redirect, with fallback)
   const handleGoogleLogin = async () => {
     try {
       setLoadingGoogle(true);
       setError(null);
-      const { firebaseUser, profile } = await signInWithGoogle();
-      onLogin({
-        username: profile.username || firebaseUser.displayName || 'GoogleUser',
-        isAdmin: !!profile.isAdmin,
-        name: profile.name || firebaseUser.displayName || undefined,
-        avatar_url: profile.avatar_url || firebaseUser.photoURL || undefined,
-        email: firebaseUser.email || undefined,
-        provider: 'google',
-      });
-      onClose();
+      const res = await signInWithGoogle();
+      if (res && res.firebaseUser) {
+        const { firebaseUser, profile } = res;
+        onLogin({
+          username: profile.username || firebaseUser.displayName || 'GoogleUser',
+          isAdmin: !!profile.isAdmin,
+          name: profile.name || firebaseUser.displayName || undefined,
+          avatar_url: profile.avatar_url || firebaseUser.photoURL || undefined,
+          email: firebaseUser.email || undefined,
+          provider: 'google',
+        });
+        onClose();
+      }
     } catch (err: any) {
       if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
         setError(null);
@@ -133,7 +136,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }
     }
   };
 
-  // Telegram Login with beautiful native blue button (OpenID Connect PKCE flow)
+  // Telegram Login (Full-screen navigation to Telegram OpenID Connect auth)
   const handleTelegramLoginClick = () => {
     try {
       setLoadingTelegram(true);
@@ -142,31 +145,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLogin }
       const origin = window.location.origin;
       const loginUrl = `/api/auth/telegram/login?origin=${encodeURIComponent(origin)}`;
 
-      const width = 550;
-      const height = 650;
-      const left = window.screenX + (window.outerWidth - width) / 2;
-      const top = window.screenY + (window.outerHeight - height) / 2;
-
-      const popup = window.open(
-        loginUrl,
-        'telegram_login',
-        `width=${width},height=${height},left=${left},top=${top},status=0,toolbar=0,menubar=0,location=1`
-      );
-
-      if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        window.location.href = loginUrl;
-        return;
-      }
-
-      const timer = setInterval(() => {
-        if (popup.closed) {
-          clearInterval(timer);
-          setLoadingTelegram(false);
-        }
-      }, 1000);
+      // Full-screen direct navigation requested by user (instead of popup window)
+      window.location.href = loginUrl;
     } catch (err: any) {
       console.error('Telegram Login Error:', err);
-      setError("Telegram oynasini ochishda xatolik yuz berdi");
+      setError("Telegram bilan ulanishda xatolik yuz berdi");
       setLoadingTelegram(false);
     }
   };

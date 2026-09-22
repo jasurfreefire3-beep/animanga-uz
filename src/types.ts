@@ -84,7 +84,10 @@ export interface UserProfile {
   bio: string;
   phone?: string;
   telegram_id?: number | string;
+  short_id?: number; // 4-digit unique numeric user ID (e.g. 1001)
   isAdmin?: boolean;
+  is_verified?: boolean; // VIP verified checkmark (given upon coin purchase or admin)
+  has_purchased_coins?: boolean; // True if user bought coins at least once
   coins?: number;
   unlocked_chapters?: number[];
   created_at: string;

@@ -8,6 +8,7 @@ import {
   Bookmark,
   Edit3,
   Check,
+  Copy,
   X,
   Shield,
   LogOut,
@@ -48,6 +49,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onOpenCoins,
 }) => {
   const [activeTab, setActiveTab] = useState<'bookmarks' | 'history' | 'comments' | 'likes'>('bookmarks');
+  const [idCopied, setIdCopied] = useState(false);
   
   // Edit mode states
   const [isEditingName, setIsEditingName] = useState(false);
@@ -257,17 +259,45 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 mb-1.5">
                   <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-white tracking-tight flex items-center gap-1.5">
                     <span>{profile.name || profile.username}</span>
-                    <VerifiedBadge size="lg" />
+                    {(profile.is_verified || profile.has_purchased_coins || profile.isAdmin) && (
+                      <VerifiedBadge size="lg" />
+                    )}
                   </h1>
+
+                  {/* 4-digit ID Badge with Copy */}
+                  <div 
+                    onClick={() => {
+                      const idText = String(profile.short_id || 1000);
+                      navigator.clipboard.writeText(idText);
+                      setIdCopied(true);
+                      setTimeout(() => setIdCopied(false), 2000);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-cyan-500/20 border border-emerald-400/40 text-emerald-300 hover:text-white hover:border-emerald-400 transition cursor-pointer shadow-sm group select-none active:scale-95"
+                    title="4 xonali Profil ID raqami (Nusxalash uchun bosing)"
+                  >
+                    <span className="text-[10px] uppercase font-bold text-emerald-400/80">ID:</span>
+                    <span className="font-mono font-black text-xs text-emerald-200 group-hover:text-white">
+                      #{profile.short_id || 1000}
+                    </span>
+                    {idCopied ? (
+                      <Check className="w-3 h-3 text-[#00DC82]" />
+                    ) : (
+                      <Copy className="w-3 h-3 text-emerald-400/70 group-hover:text-emerald-200 transition-colors" />
+                    )}
+                  </div>
                   
                   {profile.isAdmin ? (
                     <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#6c5ce7]/20 text-[#a29bfe] border border-[#6c5ce7]/40 flex items-center gap-1">
                       <Shield className="w-3 h-3 text-[#6c5ce7]" />
                       ADMIN
                     </span>
+                  ) : (profile.is_verified || profile.has_purchased_coins) ? (
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                      👑 VIP Xaridor
+                    </span>
                   ) : (
-                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-white/80 border border-white/20">
-                      Foydalanuvchi
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-white/10 text-white/70 border border-white/15" title="Tanga xarid qilganingizda VIP Tasdiqlangan (galochka) belgisi beriladi">
+                      Oddiy a'zo
                     </span>
                   )}
 
@@ -286,7 +316,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-1.5 sm:gap-2 text-xs text-[#a0a0b8] mb-2 font-mono">
                   <span className="text-white font-semibold">@{profile.username}</span>
-                  <VerifiedBadge size="sm" />
+                  {(profile.is_verified || profile.has_purchased_coins || profile.isAdmin) && (
+                    <VerifiedBadge size="sm" />
+                  )}
                   <span className="text-white/20">&bull;</span>
                   <span className="flex items-center gap-1">
                     <Calendar className="w-3 h-3 text-[#00DC82]" />

@@ -49,8 +49,21 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
   onChapterPurchased,
 }) => {
   const [showControls, setShowControls] = useState(true);
-  const [fitMode, setFitMode] = useState<'full' | 'wide' | 'compact'>('full');
+  const [fitMode, setFitMode] = useState<'full' | 'wide' | 'compact'>(() => {
+    try {
+      const saved = localStorage.getItem('animanga_reader_fit');
+      if (saved === 'full' || saved === 'wide' || saved === 'compact') return saved;
+    } catch {}
+    return 'wide'; // Default to 'wide' for computers / desktop reading
+  });
   const [zoomLevel, setZoomLevel] = useState(100);
+
+  const handleSetFitMode = (mode: 'full' | 'wide' | 'compact') => {
+    setFitMode(mode);
+    try {
+      localStorage.setItem('animanga_reader_fit', mode);
+    } catch {}
+  };
   const [showChapterList, setShowChapterList] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentVisiblePage, setCurrentVisiblePage] = useState(1);
@@ -249,24 +262,24 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
           {/* Fit Mode Switcher (Hidden on mobile, only visible on desktop/computer) */}
           <div className="hidden md:flex items-center bg-[#141428] rounded-xl p-0.5 border border-[#1e1e3a]">
             <button
-              onClick={() => setFitMode('full')}
-              className={`px-2.5 py-1 rounded-lg text-xs flex items-center gap-1 transition-colors cursor-pointer ${
-                fitMode === 'full' ? 'bg-[#00DC82] text-black font-bold' : 'text-zinc-400 hover:text-white'
-              }`}
-              title="To'liq ekran (100% Yopishgan)"
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span className="text-[11px]">To'liq</span>
-            </button>
-            <button
-              onClick={() => setFitMode('wide')}
+              onClick={() => handleSetFitMode('wide')}
               className={`px-2.5 py-1 rounded-lg text-xs flex items-center gap-1 transition-colors cursor-pointer ${
                 fitMode === 'wide' ? 'bg-[#00DC82] text-black font-bold' : 'text-zinc-400 hover:text-white'
               }`}
-              title="Keng rejim"
+              title="Keng rejim (Kompyuterlar uchun qulay o'lcham)"
             >
               <Monitor className="w-3.5 h-3.5" />
               <span className="text-[11px]">Keng</span>
+            </button>
+            <button
+              onClick={() => handleSetFitMode('full')}
+              className={`px-2.5 py-1 rounded-lg text-xs flex items-center gap-1 transition-colors cursor-pointer ${
+                fitMode === 'full' ? 'bg-[#00DC82] text-black font-bold' : 'text-zinc-400 hover:text-white'
+              }`}
+              title="To'liq rejim (100% ekran kengligi)"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span className="text-[11px]">To'liq</span>
             </button>
           </div>
 
